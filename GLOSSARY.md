@@ -32,6 +32,10 @@ _Avoid_: Like, score, favourite
 A Plex user on the server who gets their own Playlists from their own Listening history.
 _Avoid_: Account, member, user (alone)
 
+**On Repeat**:
+The Mix of the tracks a Listener has played most often lately.
+_Avoid_: Top tracks, most played
+
 **Daily Mixtape**:
 The Mix that produces a fresh, varied Playlist every day.
 _Avoid_: Daily mix, mix tape
