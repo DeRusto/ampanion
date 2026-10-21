@@ -53,5 +53,5 @@ The Mix that gives a Listener one Playlist for each of their Top Genres.
 _Avoid_: Genre radio, genre station
 
 **Daily Mixtape**:
-The Mix that produces a fresh, varied Playlist every day.
+The Mix that blends familiar and unplayed tracks into one Playlist that changes every day.
 _Avoid_: Daily mix, mix tape
