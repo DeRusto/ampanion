@@ -5,7 +5,7 @@ A self-hosted companion to a Plex server that builds personal playlists for Plex
 ## Language
 
 **Mix**:
-A named rule for choosing tracks, such as On Repeat, Deep Cuts, Genre, Daily Mixtape or New Artists.
+A named rule for choosing tracks, such as On Repeat, Deep Cuts, Genre Mix, Daily Mixtape or New Artists.
 _Avoid_: Playlist type, recipe, generator, smart playlist
 
 **Playlist**:
@@ -43,6 +43,14 @@ _Avoid_: Favourite artist, loved artist
 **Deep Cuts**:
 The Mix of tracks a Listener rarely or never plays by their Top Artists.
 _Avoid_: B-sides, rarities, hidden gems
+
+**Top Genre**:
+A genre a Listener has played most across their Listening history.
+_Avoid_: Favourite genre
+
+**Genre Mix**:
+The Mix that gives a Listener one Playlist for each of their Top Genres.
+_Avoid_: Genre radio, genre station
 
 **Daily Mixtape**:
 The Mix that produces a fresh, varied Playlist every day.
