@@ -13,8 +13,20 @@ The Plex playlist a Mix produces for one Listener, replaced each time it is refr
 _Avoid_: Mix (for the output), queue
 
 **Listening history**:
-The record of which tracks a Listener has played and when, whichever source it comes from.
+The record of a Listener's Plays, and their Skips where known, whichever source they come from.
 _Avoid_: Play history, scrobbles, stats
+
+**Play**:
+One time a Listener listened to a track to the end, on any client.
+_Avoid_: Scrobble, view, listen
+
+**Skip**:
+One time a Listener started a track but stopped early; known only when a source can see partial listens.
+_Avoid_: Partial play
+
+**Rating**:
+A Listener's current star rating of a track, album or artist; no Rating means no opinion.
+_Avoid_: Like, score, favourite
 
 **Listener**:
 A Plex user on the server who gets their own Playlists from their own Listening history.
