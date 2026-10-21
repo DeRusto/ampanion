@@ -36,6 +36,14 @@ _Avoid_: Account, member, user (alone)
 The Mix of the tracks a Listener has played most often lately.
 _Avoid_: Top tracks, most played
 
+**Top Artist**:
+An artist a Listener has played most across their Listening history.
+_Avoid_: Favourite artist, loved artist
+
+**Deep Cuts**:
+The Mix of tracks a Listener rarely or never plays by their Top Artists.
+_Avoid_: B-sides, rarities, hidden gems
+
 **Daily Mixtape**:
 The Mix that produces a fresh, varied Playlist every day.
 _Avoid_: Daily mix, mix tape
