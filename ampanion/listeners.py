@@ -13,6 +13,7 @@ from fastapi.templating import Jinja2Templates
 from ampanion.clock import Clock
 from ampanion.gateway import Gateway, GatewayError, PlexAccount
 from ampanion.mixes import MIXES, mix_config
+from ampanion.mixes.genre_mix import GENRE_MIX, surplus_genres
 from ampanion.publisher import delete_playlists, on_plex
 from ampanion.schedule import Scheduler
 from ampanion.store import Store
@@ -73,17 +74,22 @@ def add_listener_routes(
             raise HTTPException(404, "Not a Listener")
         return listener
 
-    def delete_from_plex(account_id: int, mix_keys: list[str]) -> None:
-        """Delete the Mixes' Playlists from Plex; if Plex can't be reached, nothing is changed and the Owner retries."""
+    def delete_from_plex(account_id: int, mix_keys: list[str], genres: set | None = None) -> None:
+        """Delete the Mixes' Playlists (only `genres`' if given) from Plex; if Plex can't be reached, nothing is
+        changed and the Owner retries."""
         if not any(on_plex(store, account_id, key) for key in mix_keys):
             return
         try:
             token = playlist_token(store, gateway, account_id)
             for key in mix_keys:
                 if token is None:  # no share any more: the Playlists can't be reached, so just forget them
-                    store.forget_managed_playlists(account_id, key)
+                    for p in store.managed_playlists(account_id, key):
+                        if genres is None or p.genre in genres:
+                            store.forget_managed_playlist(account_id, key, p.genre)
                 else:
-                    delete_playlists(gateway, store, url=store.server_url, token=token, account_id=account_id, mix_key=key)
+                    delete_playlists(
+                        gateway, store, url=store.server_url, token=token, account_id=account_id, mix_key=key, genres=genres
+                    )
         except GatewayError:
             raise HTTPException(502, "Couldn't reach Plex to delete the Playlists. Try again.") from None
 
@@ -143,6 +149,10 @@ def add_listener_routes(
                 context = {"page": "listener", "listener": listener_or_404(account_id), "mix": mix, "settings": settings}
                 return templates.TemplateResponse(request, "mix_off.html", context)
             delete_from_plex(account_id, [mix.key])
+        if mix.key == GENRE_MIX.key:  # a lowered count deletes the surplus Playlists now, not at the next build
+            genres = {p.genre for p in store.managed_playlists(account_id, mix.key)}
+            if surplus := surplus_genres(store.plays(account_id), genres, settings["count"]):
+                delete_from_plex(account_id, [mix.key], surplus)
         store.set_mix_settings(account_id, mix.key, enabled, settings)
         if enabled and not was_enabled:
             scheduler.request([account_id])

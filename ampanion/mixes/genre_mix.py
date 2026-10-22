@@ -1,9 +1,11 @@
 """Genre Mix: one Playlist per Top Genre, a random pick from the library's tracks in that genre."""
 
 from collections import Counter
+from datetime import datetime, timezone
 
 from ampanion.mixes.artists import pick_capped, spread_shuffle
 from ampanion.mixes.rule import Mix, MixInput, Setting
+from ampanion.store import Play
 
 TOP_GENRE_PLAYS = 20
 
@@ -17,6 +19,17 @@ def top_genres(mix: MixInput, count: int) -> list[str]:
             latest[g] = max(latest.get(g, p.played_at), p.played_at)
     ranked = sorted((g for g, n in plays.items() if n >= TOP_GENRE_PLAYS), key=lambda g: (plays[g], latest[g]), reverse=True)
     return ranked[:count]
+
+
+def surplus_genres(plays: list[Play], genres: set[str], count: int) -> set[str]:
+    """Of these genres (ones with a Playlist), those past the top `count`, ranked by the Plays' genre snapshots."""
+    counts, latest = Counter(), {}
+    for p in plays:
+        for g in p.genres:
+            counts[g] += 1
+            latest[g] = max(latest.get(g, p.played_at), p.played_at)
+    ranked = sorted(genres, key=lambda g: (counts[g], latest.get(g, datetime.min.replace(tzinfo=timezone.utc))), reverse=True)
+    return set(ranked[count:])
 
 
 def rule(mix: MixInput) -> dict[str | None, list[str]]:

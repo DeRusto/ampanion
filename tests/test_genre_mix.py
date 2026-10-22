@@ -154,6 +154,18 @@ def test_a_genre_that_drops_out_loses_its_playlist_and_a_new_top_genre_gets_one(
     assert "Jazz" not in client.get("/listeners/8").text
 
 
+def test_lowering_the_count_deletes_the_surplus_playlists_at_once(client, gateway, clock, pal):
+    genre(gateway, clock, "Rock", plays=40)
+    genre(gateway, clock, "Jazz", plays=30)
+    genre(gateway, clock, "Folk", plays=25)
+    refresh(client)
+
+    save_genre_mix(client, count="2")  # no Refresh after it
+
+    assert set(mixes(gateway)) == {"Rock Mix", "Jazz Mix"}
+    assert "Folk" not in client.get("/listeners/8").text
+
+
 def test_count_length_and_tracks_per_artist_are_editable_on_the_mixes_tab(client, gateway, clock, pal):
     genre(gateway, clock, "Rock", plays=40)
     genre(gateway, clock, "Jazz", plays=30)
