@@ -36,6 +36,10 @@ _Avoid_: Like, score, favourite
 A Plex user on the server who gets their own Playlists from their own Listening history.
 _Avoid_: Account, member, user (alone)
 
+**Owner**:
+The Plex account that owns the Plex server ampanion serves, and the only one who can manage ampanion.
+_Avoid_: Admin, user
+
 **On Repeat**:
 The Mix of the tracks a Listener has played most often lately.
 _Avoid_: Top tracks, most played
