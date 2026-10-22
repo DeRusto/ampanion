@@ -8,7 +8,7 @@ from ampanion.mixes.rule import Mix, MixInput, Setting
 TOP_GENRE_PLAYS = 20
 
 
-def top_genres(mix: MixInput) -> list[str]:
+def top_genres(mix: MixInput, count: int) -> list[str]:
     """Genres by all-time Plays (a track counts toward each of its genres), at least 20, ties to the latest Play."""
     plays, latest, tracks = Counter(), {}, mix.library.tracks
     for p in mix.plays:
@@ -16,7 +16,7 @@ def top_genres(mix: MixInput) -> list[str]:
             plays[g] += 1
             latest[g] = max(latest.get(g, p.played_at), p.played_at)
     ranked = sorted((g for g, n in plays.items() if n >= TOP_GENRE_PLAYS), key=lambda g: (plays[g], latest[g]), reverse=True)
-    return ranked[: mix.settings["count"]]
+    return ranked[:count]
 
 
 def rule(mix: MixInput) -> dict[str | None, list[str]]:
@@ -26,7 +26,7 @@ def rule(mix: MixInput) -> dict[str | None, list[str]]:
         return tracks[key].album_artist
 
     playlists = {}
-    for genre in top_genres(mix):
+    for genre in top_genres(mix, mix.settings["count"]):
         pool = [k for k, t in tracks.items() if genre in t.genres and not mix.ratings.excludes(t)]
         # pick_capped draws from a shuffled pool, so its pick is already in random order.
         playlists[genre] = pick_capped(pool, artist_of, mix.settings["length"], mix.settings["tracks_per_artist"], mix.rng)
