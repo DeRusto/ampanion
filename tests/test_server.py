@@ -109,6 +109,21 @@ def test_a_server_only_reachable_by_relay_is_chosen_but_left_unreached(client, g
     assert "couldn't be reached; set its URL below" in client.get("/settings").text
 
 
+LOCAL_HTTPS = PlexConnection(uri="https://192-168-1-20.abc.plex.direct:32400", local=True, relay=False)
+LOCAL_HTTPS_2 = PlexConnection(uri="https://10-0-0-5.abc.plex.direct:32400", local=True, relay=False)
+
+
+def test_a_local_https_connection_that_fails_is_tried_over_http_before_remote(client, gateway, sign_in):
+    answering = ["http://192-168-1-20.abc.plex.direct:32400", REMOTE.uri]
+    url = server_url_once_picked(client, gateway, sign_in, [REMOTE, LOCAL_HTTPS], answering)
+    assert url == "http://192-168-1-20.abc.plex.direct:32400"
+
+
+def test_every_local_connection_is_tried_as_listed_before_any_falls_back_to_http(client, gateway, sign_in):
+    answering = ["http://192-168-1-20.abc.plex.direct:32400", LOCAL_HTTPS_2.uri]
+    assert server_url_once_picked(client, gateway, sign_in, [LOCAL_HTTPS, LOCAL_HTTPS_2], answering) == LOCAL_HTTPS_2.uri
+
+
 def test_a_connection_answering_as_another_server_is_skipped(client, gateway, sign_in):
     gateway.serve(LOCAL.uri, "someone-elses")
     assert server_url_once_picked(client, gateway, sign_in, [LOCAL, REMOTE], [REMOTE.uri]) == REMOTE.uri
