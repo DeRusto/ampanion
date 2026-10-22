@@ -3,7 +3,7 @@
 import pytest
 
 from tests.test_listeners import add_listener
-from tests.test_on_repeat import PAL, listen, refresh
+from tests.test_on_repeat import PAL, background, listen, refresh
 from tests.test_sign_in import csrf_from
 
 
@@ -15,6 +15,7 @@ def pal(client, gateway, sign_in):
     gateway.add_user("owner-token", "Pal", account_id=8, share=server)
     sign_in(client, "owner-token")
     add_listener(client, 8)
+    background(client)  # the Refresh on add finds an empty library, so no Playlist is "last time's" yet
     return 8
 
 
@@ -59,7 +60,7 @@ def test_new_artists_are_unplayed_album_artists_capped_per_artist_and_spread(cli
     assert all(a.startswith("New") for a in artists)
     assert max(artists.count(a) for a in artists) <= 3
     assert all(a != b for a, b in zip(artists, artists[1:]))
-    assert new_artists(gateway).summary == "Made by ampanion: New Artists. Refreshed daily; edits are replaced."
+    assert new_artists(gateway).summary == "Made by ampanion: New Artists. Refreshed weekly; edits are replaced."
 
 
 def test_artists_sharing_a_top_genre_are_favoured(client, gateway, clock, pal):
