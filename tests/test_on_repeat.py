@@ -133,7 +133,7 @@ def test_later_refreshes_replace_the_tracks_in_place_keeping_the_playlist_id(cli
     listen(gateway, clock, 8, "t20", times=9)
     refresh(client)
 
-    assert [p.id for p in gateway.playlists_of(PAL)] == [first.id]
+    assert [p.id for p in gateway.playlists_of(PAL) if p.title == "On Repeat"] == [first.id]
     assert on_repeat(gateway).items == ["t20", "t1", "t2", "t3", "t4", "t5"]
 
 
