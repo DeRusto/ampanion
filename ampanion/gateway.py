@@ -331,7 +331,7 @@ class PlexGateway:
     def history(self, url: str, token: str, account_id: int, since: datetime | None) -> list[HistoryEntry]:
         params = {"sort": "viewedAt:desc", "accountID": account_id}
         if since is not None:
-            params["viewedAt>"] = int(since.timestamp())  # "viewedAt>=<epoch>": at or after. shortcut: assumes Plex decodes %3E in keys, check in the live contract suite
+            params["viewedAt>"] = int(since.timestamp())  # "viewedAt>=<epoch>": at or after. shortcut: assumes Plex decodes %3E in keys, unverified until tests/test_live_gateway.py runs against a live server
         return [
             HistoryEntry(
                 history_key=e["historyKey"],
@@ -347,7 +347,7 @@ class PlexGateway:
         ]
 
     def library_tracks(self, url: str, token: str) -> list[LibraryTrack]:
-        # shortcut: whether bulk track listings carry Genre tags is unverified, check in the live contract suite
+        # shortcut: assumes bulk listings carry Genre tags and ratingCount, unverified until tests/test_live_gateway.py runs against a live server
         tracks = []
         for section in self._music_sections(url, token):
             path = f"/library/sections/{section}/all"
