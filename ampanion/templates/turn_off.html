@@ -1,0 +1,12 @@
+{% extends "layout.html" %}
+{% block title %}Turn off {{ listener.name }}{% endblock %}
+{% block main %}
+<h1>Turn off {{ listener.name }}?</h1>
+<p>Their Playlists will be deleted from Plex, and ampanion forgets their Listening history and settings.</p>
+<form method="post" action="/listeners/{{ listener.account_id }}/turn-off">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit" class="danger"{% if scheduler.running %} disabled{% endif %}>Turn off {{ listener.name }}</button>
+  {% if scheduler.running %}<span class="progress" role="status">Wait for the Refresh to finish: {{ scheduler.progress }}</span>{% endif %}
+  <a href="/listeners/{{ listener.account_id }}">Cancel</a>
+</form>
+{% endblock %}

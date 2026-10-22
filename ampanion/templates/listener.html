@@ -1,0 +1,43 @@
+{% extends "layout.html" %}
+{% block title %}{{ listener.name }}{% endblock %}
+{% block main %}
+<header class="listener">
+  <h1>{{ listener.name }}</h1>
+  {% with account_id = listener.account_id %}{% include "refresh_button.html" %}{% endwith %}
+  <a class="button" href="/listeners/{{ listener.account_id }}/turn-off">Turn off</a>
+</header>
+<nav class="tabs">
+  {% for t in tabs %}
+  <a class="{% if t == tab %}on{% endif %}" href="?tab={{ t }}">{{ t | capitalize }}</a>
+  {% endfor %}
+</nav>
+<section>
+  {% if tab == 'mixes' %}
+  {% for mix, enabled, settings, playlists in mixes %}
+  <form class="mix" method="post" action="/listeners/{{ listener.account_id }}/mixes/{{ mix.key }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <h3>{{ mix.title }}</h3>
+    <p class="cadence">Refreshed {{ 'daily' if cadences[mix.key] == 'daily' else 'weekly on Mondays' }} (set in <a href="/settings">Settings</a>)</p>
+    <label><input type="checkbox" name="enabled"{% if enabled %} checked{% endif %}> On</label>
+    {% for s in mix.settings %}
+    <label>{{ s.label }} <input type="number" name="{{ s.key }}" value="{{ settings[s.key] }}" min="{{ s.min }}" max="{{ s.max }}" required></label>
+    {% endfor %}
+    <button type="submit"{% if scheduler.running %} disabled title="Wait for the Refresh to finish"{% endif %}>Save</button>
+    <p class="status-line">{% for p in playlists %}{% if p.genre %}{{ p.genre }}: {% endif %}{{ p.status }}{% if not loop.last %}; {% endif %}{% else %}Not refreshed yet{% endfor %}</p>
+  </form>
+  {% endfor %}
+  {% elif tab == 'playlists' %}
+  {% if playlists_error %}<p class="error">{{ playlists_error }}</p>
+  {% elif playlists %}
+  <table class="playlists">
+    <thead><tr><th>Playlist</th><th>Tracks</th><th>Last refresh</th></tr></thead>
+    <tbody>
+    {% for title, p in playlists %}
+    <tr><td>{{ title }}</td><td>{{ p.tracks | length }}</td><td>{{ (p.refreshed_at | local).strftime('%Y-%m-%d %H:%M') }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p>ampanion hasn't made any Playlists for {{ listener.name }} yet.</p>{% endif %}
+  {% else %}{% include "refreshes.html" %}{% endif %}
+</section>
+{% endblock %}

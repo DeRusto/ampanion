@@ -1,0 +1,7 @@
+{% extends "layout.html" %}
+{% block title %}Sign in{% endblock %}
+{% block main %}
+<h1>Sign in</h1>
+{% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
+<p><a class="button" href="/signin/plex">Sign in with Plex</a></p>
+{% endblock %}

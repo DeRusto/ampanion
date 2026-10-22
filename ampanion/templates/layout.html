@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{% endblock %} · ampanion</title>
+  <link rel="stylesheet" href="/static/ampanion.css">
+  {# htmx 2.0.4, vendored (no CDN): unpkg.com/htmx.org@2.0.4/dist/htmx.min.js #}
+  <script src="/static/htmx.min.js"></script>
+</head>
+<body{% if csrf_token %} hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'{% endif %}>
+  <nav class="sidebar">
+    <a class="brand" href="/">
+      <span class="wordmark"><span class="amp">Amp</span><span class="anion">anion</span></span>
+      <span class="tagline">Your Plexamp companion for playlists that make themselves.</span>
+    </a>
+    {% if csrf_token %}
+    <a class="item{% if page == 'home' %} on{% endif %}" href="/">Home</a>
+    {% for person in sidebar_people %}
+      {% if person.state == 'listener' %}
+    <a class="item{% if listener and listener.account_id == person.account_id %} on{% endif %}" href="/listeners/{{ person.account_id }}">{{ person.name }}{% if person.status %} <span class="status {{ person.status }}" title="Last Refresh: {{ person.status }}" aria-label="Last Refresh: {{ person.status }}">{{ {'ok': '✓', 'failed': '!', 'refreshing': '↻'}[person.status] }}</span>{% endif %}</a>
+      {% elif person.state == 'available' %}
+    <form class="item add" method="post" action="/listeners">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <span>{{ person.name }}</span>
+      <button type="submit" name="account_id" value="{{ person.account_id }}" aria-label="Make {{ person.name }} a Listener">+</button>
+    </form>
+      {% else %}
+    <span class="item unavailable">{{ person.name }} <small>No library share on this server</small></span>
+      {% endif %}
+    {% endfor %}
+    {% if sidebar_error %}<p class="error" role="alert">{{ sidebar_error }}</p>{% endif %}
+    <a class="item settings{% if page == 'settings' %} on{% endif %}" href="/settings">Settings</a>
+    {% endif %}
+  </nav>
+  <main>
+    {% if csrf_token and plex_expired %}
+    <p class="banner error" role="alert">Plex sign-in expired, so Refreshes are paused. <a href="/signin/plex">Sign in again</a></p>
+    {% endif %}
+    {% block main %}{% endblock %}
+  </main>
+</body>
+</html>
