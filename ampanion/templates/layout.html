@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}{% endblock %} · ampanion</title>
   <link rel="stylesheet" href="/static/ampanion.css">
+  {# htmx 2.0.4, vendored (no CDN): unpkg.com/htmx.org@2.0.4/dist/htmx.min.js #}
+  <script src="/static/htmx.min.js"></script>
 </head>
 <body{% if csrf_token %} hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'{% endif %}>
   <nav class="sidebar">

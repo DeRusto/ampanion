@@ -1,6 +1,8 @@
-{# A Refresh now button: disabled, showing progress, while a run is in progress. Set action and label. #}
-<form method="post" action="{{ action }}">
+{# Refresh now, for one Listener (account_id) or all (none). While a run is in progress it is disabled, shows progress
+   and, through HTMX, fetches itself again every 2s until the run ends and it comes back enabled. #}
+<form method="post" action="{{ '/listeners/%d/refresh' % account_id if account_id else '/refresh' }}"
+  {%- if scheduler.busy %} hx-get="/refresh/button{{ '?account_id=%d' % account_id if account_id else '' }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <button type="submit"{% if scheduler.busy %} disabled{% endif %}>{{ label }}</button>
+  <button type="submit"{% if scheduler.busy %} disabled{% endif %}>{{ 'Refresh now' if account_id else 'Refresh all now' }}</button>
   {% if scheduler.busy %}<span class="progress" role="status">{{ scheduler.progress }}</span>{% endif %}
 </form>

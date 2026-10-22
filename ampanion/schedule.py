@@ -14,6 +14,7 @@ from random import Random
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
+from fastapi.templating import Jinja2Templates
 
 from ampanion import refresh
 from ampanion.clock import Clock
@@ -199,13 +200,18 @@ class Scheduler:
             self._wake.wait(POLL_SECONDS)
 
 
-def add_schedule_routes(app: FastAPI, *, store: Store, scheduler: Scheduler):
+def add_schedule_routes(app: FastAPI, *, store: Store, scheduler: Scheduler, templates: Jinja2Templates):
     def refresh_now(account_ids: list[int] | None, back: str):
         if store.owner_token_expired:
             raise HTTPException(409, f"{EXPIRED}, so Refreshes are paused. Sign in again to resume them.")
         if not scheduler.request_now(account_ids):
             raise HTTPException(409, "A Refresh is already running")
         return RedirectResponse(back, 303)
+
+    @app.get("/refresh/button")
+    def refresh_button(request: Request, account_id: int | None = None):
+        """A Refresh now button as it is now: what a busy one polls for (HTMX), until the run ends."""
+        return templates.TemplateResponse(request, "refresh_button.html", {"account_id": account_id})
 
     @app.post("/refresh")
     def refresh_all_now():

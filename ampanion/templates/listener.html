@@ -3,7 +3,7 @@
 {% block main %}
 <header class="listener">
   <h1>{{ listener.name }}</h1>
-  {% with action = "/listeners/%d/refresh" % listener.account_id, label = "Refresh now" %}{% include "refresh_button.html" %}{% endwith %}
+  {% with account_id = listener.account_id %}{% include "refresh_button.html" %}{% endwith %}
   <a class="button" href="/listeners/{{ listener.account_id }}/turn-off">Turn off</a>
 </header>
 <nav class="tabs">

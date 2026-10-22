@@ -67,7 +67,7 @@ def create_app(
     add_sign_in_routes(app, store=store, gateway=gateway, clock=clock, templates=templates, scheduler=scheduler)
     add_server_routes(app, store=store, gateway=gateway)
     add_listener_routes(app, store=store, gateway=gateway, clock=clock, templates=templates, scheduler=scheduler)
-    add_schedule_routes(app, store=store, scheduler=scheduler)
+    add_schedule_routes(app, store=store, scheduler=scheduler, templates=templates)
 
     @app.get("/health")
     def health():

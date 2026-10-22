@@ -29,7 +29,7 @@
 {% endif %}
 <section class="schedule">
   <p>Next nightly Refresh: {{ (scheduler.next_run() | local).strftime('%a %d %b %H:%M') }}</p>
-  {% with action = "/refresh", label = "Refresh all now" %}{% include "refresh_button.html" %}{% endwith %}
+  {% with account_id = None %}{% include "refresh_button.html" %}{% endwith %}
 </section>
 <section>
   <h2>Recent Refreshes</h2>

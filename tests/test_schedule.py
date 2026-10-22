@@ -130,6 +130,24 @@ def test_refresh_all_now_refreshes_every_listener_in_the_background(client, gate
     assert "disabled" not in client.get("/").text.split("Refresh all now")[0].rsplit("<button", 1)[1]
 
 
+def test_refresh_buttons_follow_a_run_on_their_own_and_come_back_when_it_ends(client, gateway, clock, pal):
+    home = client.get("/").text
+    assert '<script src="/static/htmx.min.js"></script>' in home
+    assert "htmx" in client.get("/static/htmx.min.js").text
+    poll = home.split('hx-get="')[1].split('"')[0]  # the busy button asks for itself again
+    assert 'hx-trigger="every 2s"' in home
+    seen = []
+    gateway.while_reading_history = lambda: seen.append(client.get(poll).text)
+
+    background(client)  # Pal's first Refresh
+
+    assert "Refreshing Pal (1 of 1)" in seen[0] and "disabled" in seen[0]
+    after = client.get(poll).text
+    assert "Refresh all now" in after and "disabled" not in after and "hx-trigger" not in after
+    listener = client.get("/listeners/8").text
+    assert "hx-get" not in listener.split("Refresh now")[0].rsplit("<form", 1)[1]
+
+
 def test_run_time_and_cadence_are_edited_in_settings_and_shown_on_the_mixes_tab(client, gateway, clock, pal):
     html = client.get("/settings").text
     assert 'name="run_time" value="04:00"' in html
