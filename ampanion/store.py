@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS managed_playlists (
     tracks       TEXT NOT NULL DEFAULT '[]', -- JSON list of the rating keys last published
     status       TEXT NOT NULL,
     refreshed_at TEXT NOT NULL,
-    picked       TEXT NOT NULL DEFAULT '[]', -- JSON list of the rating keys last picked, published or held back
+    picked       TEXT NOT NULL DEFAULT '[]', -- JSON list of the guids (rating key if none) last picked, published or held back
     rank         INTEGER NOT NULL DEFAULT 0, -- Genre Mix only: its genre's place in the last build, from 0
     PRIMARY KEY (account_id, mix, genre)
 );
@@ -126,7 +126,7 @@ class ManagedPlaylist:
     tracks: list[str]
     status: str
     refreshed_at: datetime
-    picked: list[str] = field(default_factory=list)  # the last Refresh's pick, even one held back: "previous" for rules
+    picked: list[str] = field(default_factory=list)  # guids of the last Refresh's pick, even one held back: "previous" for rules
     rank: int = 0  # Genre Mix only: the genre's place among the Top Genres when last built
 
 

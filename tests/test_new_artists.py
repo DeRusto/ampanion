@@ -115,6 +115,20 @@ def test_last_times_artists_are_skipped_on_the_next_refresh_only(client, gateway
     assert len(third) == 10 and not second & third and third <= first
 
 
+def test_last_times_artists_are_still_skipped_after_a_rescan_gives_their_tracks_new_keys(client, gateway, clock, pal):
+    for i in range(12):
+        artist_with(gateway, clock, f"New{i}", tracks=3)
+    refresh(client)
+    first = new_artists(gateway).items
+    for key in [k for i in range(12) for k in (f"New{i}-0", f"New{i}-1", f"New{i}-2")]:
+        gateway.rekey_track(key, f"rescanned-{key}")
+
+    refresh(client)
+
+    second = {artist_of(k.removeprefix("rescanned-")) for k in new_artists(gateway).items}
+    assert len(second) == 2 and not {artist_of(k) for k in first} & second
+
+
 def test_a_refresh_held_back_by_the_five_track_minimum_still_lifts_the_exclusion_after_it(client, gateway, clock, pal):
     for i in range(11):
         artist_with(gateway, clock, f"New{i}", tracks=3)

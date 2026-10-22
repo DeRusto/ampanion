@@ -139,13 +139,16 @@ def refresh_listener(
         if not enabled or not due(account_id, mix):
             continue
         try:
-            previous = {p.genre: p.picked for p in store.managed_playlists(account_id, mix.key)}
+            # Picks are kept by guid, so a rescan that gives a track a new rating key doesn't lift its exclusion.
+            managed = store.managed_playlists(account_id, mix.key)
+            previous = {p.genre: [library.by_guid.get(g, g) for g in p.picked] for p in managed}
             # Every Playlist of the Mix is computed before any is touched.
             playlists = mix.rule(MixInput(plays, skips, library, ratings, settings, previous, clock.now(), rng))
             for rank, (genre, tracks) in enumerate(playlists.items()):  # a Genre Mix rule returns them best first
                 status = publish(
                     gateway, store, url=url, machine_id=store.server_machine_id, token=token, account_id=account_id,
                     mix=mix, genre=genre, tracks=tracks, length=settings["length"], now=clock.now(), rank=rank,
+                    picked=[library.tracks[k].guid or k for k in tracks],
                 )
                 outcomes.append({"mix": mix.key, "outcome": "ok", "detail": f"{playlist_title(mix, genre)}: {status}"})
             if dropped := previous.keys() - playlists.keys():  # e.g. a genre no longer a Top Genre

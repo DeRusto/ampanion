@@ -33,9 +33,10 @@ def summary_marker(title: str, cadence: str) -> str:
 
 def publish(
     gateway: Gateway, store: Store, *, url: str, machine_id: str, token: str, account_id: int,
-    mix: Mix, genre: str | None, tracks: list[str], length: int, now: datetime, rank: int = 0,
+    mix: Mix, genre: str | None, tracks: list[str], length: int, now: datetime,
+    rank: int = 0, picked: list[str],
 ) -> str:
-    """Publish one Playlist with the Listener's token and return its status line.
+    """Publish one Playlist with the Listener's token and return its status line. `picked` is kept as the pick.
 
     Under MIN_TRACKS nothing is created and an existing Playlist is left untouched.
     """
@@ -43,7 +44,7 @@ def publish(
     managed = next((p for p in store.managed_playlists(account_id, mix.key) if p.genre == genre), None)
     if len(tracks) < MIN_TRACKS:
         # The Playlist stays, but the next Refresh excludes only this pick: an exclusion lasts one Refresh.
-        kept = replace(managed, status=status, picked=tracks, rank=rank) if managed else ManagedPlaylist(mix.key, genre, None, [], status, now, tracks, rank)
+        kept = replace(managed, status=status, picked=picked, rank=rank) if managed else ManagedPlaylist(mix.key, genre, None, [], status, now, picked, rank)
         store.save_managed_playlist(account_id, kept)
         return status
     title = playlist_title(mix, genre)
@@ -66,7 +67,7 @@ def publish(
     for i in range(0, len(rest), CHUNK):
         gateway.add_to_playlist(url, token, machine_id, playlist_id, rest[i : i + CHUNK])
     gateway.set_playlist_summary(url, token, playlist_id, marker)
-    store.save_managed_playlist(account_id, ManagedPlaylist(mix.key, genre, playlist_id, tracks, status, now, tracks, rank))
+    store.save_managed_playlist(account_id, ManagedPlaylist(mix.key, genre, playlist_id, tracks, status, now, picked, rank))
     return status
 
 
