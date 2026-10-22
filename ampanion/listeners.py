@@ -22,7 +22,7 @@ TABS = ("mixes", "playlists", "history")
 
 
 @dataclass(frozen=True)
-class SidebarUser:
+class SidebarPerson:
     account_id: int
     name: str
     state: str  # "listener", "available" or "unavailable"
@@ -43,25 +43,25 @@ def playlist_token(store: Store, gateway: Gateway, account_id: int) -> str | Non
     return gateway.shared_tokens(store.owner_token, store.server_machine_id).get(account_id)
 
 
-def sidebar_users(store: Store, gateway: Gateway) -> tuple[list[SidebarUser], str | None]:
+def sidebar_people(store: Store, gateway: Gateway) -> tuple[list[SidebarPerson], str | None]:
     """The sidebar's Plex users and an error to show; stored Listeners are listed even when Plex can't be reached."""
     listeners = store.listeners()
     ids = {listener.account_id for listener in listeners}
     states = store.refresh_states()
     try:
         # shortcut: asks plex.tv on every page view, cache the list if pages feel slow
-        users = [
-            SidebarUser(u.id, u.username, "listener" if u.id in ids else "available" if ok else "unavailable", states.get(u.id))
+        people = [
+            SidebarPerson(u.id, u.username, "listener" if u.id in ids else "available" if ok else "unavailable", states.get(u.id))
             for u, ok in plex_users(store, gateway)
         ]
         error = None
     except GatewayError:
-        users, error = [], "Couldn't reach Plex to list its users."
-    shown = {u.account_id for u in users}
-    users += [
-        SidebarUser(l.account_id, l.name, "listener", states.get(l.account_id)) for l in listeners if l.account_id not in shown
+        people, error = [], "Couldn't reach Plex to list its users."
+    shown = {u.account_id for u in people}
+    people += [
+        SidebarPerson(l.account_id, l.name, "listener", states.get(l.account_id)) for l in listeners if l.account_id not in shown
     ]
-    return users, error
+    return people, error
 
 
 def add_listener_routes(

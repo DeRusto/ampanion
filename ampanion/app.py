@@ -13,7 +13,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from ampanion.auth import PUBLIC_PATHS, SESSION_MAX_AGE, add_sign_in_routes, csrf_token, session_guard
 from ampanion.clock import Clock
 from ampanion.gateway import Gateway, GatewayError
-from ampanion.listeners import add_listener_routes, sidebar_users
+from ampanion.listeners import add_listener_routes, sidebar_people
 from ampanion.mixes import MIXES, mix_cadence
 from ampanion.schedule import Scheduler, add_schedule_routes
 from ampanion.server import add_server_routes, choose, owned_servers
@@ -35,9 +35,9 @@ def create_app(
 
     def sidebar(request: Request) -> dict:
         if request.url.path in PUBLIC_PATHS or store.server_machine_id is None:
-            return {"sidebar_users": [], "sidebar_error": None}
-        users, error = sidebar_users(store, gateway)
-        return {"sidebar_users": users, "sidebar_error": error}
+            return {"sidebar_people": [], "sidebar_error": None}
+        people, error = sidebar_people(store, gateway)
+        return {"sidebar_people": people, "sidebar_error": error}
 
     templates = Jinja2Templates(
         directory=HERE / "templates",
