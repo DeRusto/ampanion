@@ -14,7 +14,7 @@ from ampanion.clock import Clock
 from ampanion.gateway import Gateway, GatewayError
 from ampanion.library import LibraryIndex, Ratings
 from ampanion.mixes import MIXES, MixInput, mix_config
-from ampanion.publisher import playlist_title, publish
+from ampanion.publisher import delete_playlists, playlist_title, publish
 from ampanion.store import Listener, Store
 
 log = logging.getLogger(__name__)
@@ -95,6 +95,8 @@ def refresh_listener(
                     mix=mix, genre=genre, tracks=tracks, length=settings["length"], now=clock.now(),
                 )
                 outcomes.append({"mix": mix.key, "outcome": "ok", "detail": f"{playlist_title(mix, genre)}: {status}"})
+            if dropped := previous.keys() - playlists.keys():  # e.g. a genre no longer a Top Genre
+                delete_playlists(gateway, store, url=url, token=token, account_id=account_id, mix_key=mix.key, genres=dropped)
         except Exception as e:
             if not isinstance(e, GatewayError):
                 log.exception("%s for %s failed", mix.title, listener.name)
