@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS app_settings (
 CREATE TABLE IF NOT EXISTS listeners (
     account_id INTEGER PRIMARY KEY,  -- plex.tv account id
     name       TEXT NOT NULL,
-    added_at   TEXT NOT NULL
+    added_at   TEXT NOT NULL,
+    first_fill_done INTEGER NOT NULL DEFAULT 0  -- their whole Plex history has been read once
 );
 CREATE TABLE IF NOT EXISTS plays (
     account_id   INTEGER NOT NULL,
@@ -315,7 +316,7 @@ class Store:
 
     def add_listener(self, account_id: int, name: str, added_at: datetime) -> None:
         with self.connect() as db:
-            db.execute("INSERT OR IGNORE INTO listeners VALUES (?, ?, ?)", (account_id, name, added_at.isoformat()))
+            db.execute("INSERT OR IGNORE INTO listeners VALUES (?, ?, ?, 0)", (account_id, name, added_at.isoformat()))
 
     def remove_listener(self, account_id: int) -> None:
         """Forget everything stored for the Listener. Later tables (Plays, Skips, Mix settings...) are deleted here too."""
@@ -325,13 +326,15 @@ class Store:
 
     # --- Listening history ---
 
-    def has_plays(self, account_id: int) -> bool:
+    def first_fill_done(self, account_id: int) -> bool:
         with self.connect() as db:
-            return db.execute("SELECT 1 FROM plays WHERE account_id = ? LIMIT 1", (account_id,)).fetchone() is not None
+            row = db.execute("SELECT first_fill_done FROM listeners WHERE account_id = ?", (account_id,)).fetchone()
+        return bool(row and row[0])
 
     def add_plays(self, account_id: int, plays: list[tuple[str, Play]]) -> None:
-        """Insert (historyKey, Play) pairs; ones already stored are left as they are."""
+        """Insert (historyKey, Play) pairs, leaving ones already stored; the Listener's first fill is then done."""
         with self.connect() as db:
+            db.execute("UPDATE listeners SET first_fill_done = 1 WHERE account_id = ?", (account_id,))
             db.executemany(
                 "INSERT OR IGNORE INTO plays VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [

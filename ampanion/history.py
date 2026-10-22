@@ -20,8 +20,7 @@ def sync(
     library: LibraryIndex, now: datetime,
 ) -> None:
     """Raises GatewayError if Plex's history can't be read; nothing is stored then."""
-    # No cached Plays means no fill yet (or an empty history, which is as cheap to read again).
-    since = now - INCREMENTAL_WINDOW if store.has_plays(account_id) else None
+    since = now - INCREMENTAL_WINDOW if store.first_fill_done(account_id) else None
     entries = gateway.history(url, owner_token, history_account_id, since)
     store.add_plays(
         account_id,

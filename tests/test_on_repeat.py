@@ -222,6 +222,17 @@ def test_the_first_refresh_reads_all_history_and_later_ones_only_the_last_90_day
     assert on_repeat(gateway).items == ["t7", "t1", "t2", "t3", "t4", "t5"]
 
 
+def test_the_first_fill_happens_once_even_when_the_history_was_empty(client, gateway, clock, pal):
+    save_mix(client, window_days="400")
+    refresh(client)  # the first fill finds nothing
+
+    for n in range(1, 6):
+        play(gateway, clock, 8, f"t{n}", times=2, days_ago=200)  # turns up late, older than 90 days: never read
+    refresh(client)
+
+    assert on_repeat(gateway) is None
+
+
 def test_plays_deleted_in_plex_stay_in_ampanion(client, gateway, clock, pal):
     for n in range(1, 6):
         play(gateway, clock, 8, f"t{n}", times=2, days_ago=n)
