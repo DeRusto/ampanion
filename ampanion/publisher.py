@@ -33,7 +33,7 @@ def summary_marker(title: str, cadence: str) -> str:
 
 def publish(
     gateway: Gateway, store: Store, *, url: str, machine_id: str, token: str, account_id: int,
-    mix: Mix, genre: str | None, tracks: list[str], length: int, now: datetime,
+    mix: Mix, genre: str | None, tracks: list[str], length: int, now: datetime, rank: int = 0,
 ) -> str:
     """Publish one Playlist with the Listener's token and return its status line.
 
@@ -43,7 +43,7 @@ def publish(
     managed = next((p for p in store.managed_playlists(account_id, mix.key) if p.genre == genre), None)
     if len(tracks) < MIN_TRACKS:
         # The Playlist stays, but the next Refresh excludes only this pick: an exclusion lasts one Refresh.
-        kept = replace(managed, status=status, picked=tracks) if managed else ManagedPlaylist(mix.key, genre, None, [], status, now, tracks)
+        kept = replace(managed, status=status, picked=tracks, rank=rank) if managed else ManagedPlaylist(mix.key, genre, None, [], status, now, tracks, rank)
         store.save_managed_playlist(account_id, kept)
         return status
     title = playlist_title(mix, genre)
@@ -61,12 +61,12 @@ def publish(
             status += ", recreated (was deleted in Plex)"
         playlist_id = gateway.create_playlist(url, token, machine_id, title, tracks[:CHUNK])
         # Remember the id at once, so a failure below doesn't lead to a duplicate Playlist next time.
-        store.save_managed_playlist(account_id, ManagedPlaylist(mix.key, genre, playlist_id, [], status, now))
+        store.save_managed_playlist(account_id, ManagedPlaylist(mix.key, genre, playlist_id, [], status, now, [], rank))
         rest = tracks[CHUNK:]
     for i in range(0, len(rest), CHUNK):
         gateway.add_to_playlist(url, token, machine_id, playlist_id, rest[i : i + CHUNK])
     gateway.set_playlist_summary(url, token, playlist_id, marker)
-    store.save_managed_playlist(account_id, ManagedPlaylist(mix.key, genre, playlist_id, tracks, status, now, tracks))
+    store.save_managed_playlist(account_id, ManagedPlaylist(mix.key, genre, playlist_id, tracks, status, now, tracks, rank))
     return status
 
 

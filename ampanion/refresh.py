@@ -142,10 +142,10 @@ def refresh_listener(
             previous = {p.genre: p.picked for p in store.managed_playlists(account_id, mix.key)}
             # Every Playlist of the Mix is computed before any is touched.
             playlists = mix.rule(MixInput(plays, skips, library, ratings, settings, previous, clock.now(), rng))
-            for genre, tracks in playlists.items():
+            for rank, (genre, tracks) in enumerate(playlists.items()):  # a Genre Mix rule returns them best first
                 status = publish(
                     gateway, store, url=url, machine_id=store.server_machine_id, token=token, account_id=account_id,
-                    mix=mix, genre=genre, tracks=tracks, length=settings["length"], now=clock.now(),
+                    mix=mix, genre=genre, tracks=tracks, length=settings["length"], now=clock.now(), rank=rank,
                 )
                 outcomes.append({"mix": mix.key, "outcome": "ok", "detail": f"{playlist_title(mix, genre)}: {status}"})
             if dropped := previous.keys() - playlists.keys():  # e.g. a genre no longer a Top Genre

@@ -67,6 +67,7 @@ CREATE TABLE IF NOT EXISTS managed_playlists (
     status       TEXT NOT NULL,
     refreshed_at TEXT NOT NULL,
     picked       TEXT NOT NULL DEFAULT '[]', -- JSON list of the rating keys last picked, published or held back
+    rank         INTEGER NOT NULL DEFAULT 0, -- Genre Mix only: its genre's place in the last build, from 0
     PRIMARY KEY (account_id, mix, genre)
 );
 CREATE TABLE IF NOT EXISTS mix_builds (
@@ -126,6 +127,7 @@ class ManagedPlaylist:
     status: str
     refreshed_at: datetime
     picked: list[str] = field(default_factory=list)  # the last Refresh's pick, even one held back: "previous" for rules
+    rank: int = 0  # Genre Mix only: the genre's place among the Top Genres when last built
 
 
 @dataclass(frozen=True)
@@ -408,12 +410,12 @@ class Store:
     def managed_playlists(self, account_id: int, mix: str) -> list[ManagedPlaylist]:
         with self.connect() as db:
             rows = db.execute(
-                "SELECT mix, genre, playlist_id, tracks, status, refreshed_at, picked FROM managed_playlists"
+                "SELECT mix, genre, playlist_id, tracks, status, refreshed_at, picked, rank FROM managed_playlists"
                 " WHERE account_id = ? AND mix = ? ORDER BY genre",
                 (account_id, mix),
             ).fetchall()
         return [
-            ManagedPlaylist(r[0], r[1] or None, r[2], json.loads(r[3]), r[4], datetime.fromisoformat(r[5]), json.loads(r[6]))
+            ManagedPlaylist(r[0], r[1] or None, r[2], json.loads(r[3]), r[4], datetime.fromisoformat(r[5]), json.loads(r[6]), r[7])
             for r in rows
         ]
 
@@ -421,10 +423,10 @@ class Store:
         p = playlist
         with self.connect() as db:
             db.execute(
-                "INSERT OR REPLACE INTO managed_playlists VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO managed_playlists VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     account_id, p.mix, p.genre or "", p.playlist_id, json.dumps(p.tracks), p.status,
-                    p.refreshed_at.isoformat(), json.dumps(p.picked),
+                    p.refreshed_at.isoformat(), json.dumps(p.picked), p.rank,
                 ),
             )
 

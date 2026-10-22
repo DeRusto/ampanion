@@ -13,7 +13,7 @@ from fastapi.templating import Jinja2Templates
 from ampanion.clock import Clock
 from ampanion.gateway import Gateway, GatewayError, PlexAccount
 from ampanion.mixes import MIXES, mix_config
-from ampanion.mixes.genre_mix import GENRE_MIX, surplus_genres
+from ampanion.mixes.genre_mix import GENRE_MIX
 from ampanion.publisher import delete_playlists, on_plex
 from ampanion.schedule import Scheduler
 from ampanion.store import Store
@@ -153,8 +153,8 @@ def add_listener_routes(
             if not enabled:
                 delete_from_plex(account_id, [mix.key])
             elif mix.key == GENRE_MIX.key:  # a lowered count deletes the surplus Playlists now, not at the next build
-                genres = {p.genre for p in store.managed_playlists(account_id, mix.key)}
-                if surplus := surplus_genres(store.plays(account_id), genres, settings["count"]):
+                # ranked as the last build ranked them, which is what the Playlists show
+                if surplus := {p.genre for p in store.managed_playlists(account_id, mix.key) if p.rank >= settings["count"]}:
                     delete_from_plex(account_id, [mix.key], surplus)
             store.set_mix_settings(account_id, mix.key, enabled, settings)
 
