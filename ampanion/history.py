@@ -1,6 +1,6 @@
 """History sync: bring a Listener's cached Listening history up to date, Plays from Plex and Skips from Tautulli.
 
-The first fill reads their whole Plex history; later syncs re-read a trailing window and insert only unseen entries.
+The first fill reads their whole Plex history; later syncs re-read a trailing window before the last one and insert only unseen entries.
 Plays deleted in Plex stay. Each Play and Skip keeps a track snapshot, and is re-linked by guid when its rating key changes.
 """
 
@@ -20,7 +20,8 @@ def sync(
     library: LibraryIndex, now: datetime,
 ) -> None:
     """Raises GatewayError if Plex's history can't be read; nothing is stored then."""
-    since = now - INCREMENTAL_WINDOW if store.first_fill_done(account_id) else None
+    synced = store.plays_synced(account_id)  # reading back from it too covers an outage longer than the window
+    since = min(now, synced) - INCREMENTAL_WINDOW if synced else None
     entries = gateway.history(url, owner_token, history_account_id, since)
     store.add_plays(
         account_id,
@@ -34,6 +35,7 @@ def sync(
             )
             for e in entries
         ],
+        now,
     )
     kept = [*store.plays(account_id), *store.skips(account_id)]
     stale = {e.guid for e in kept if e.rating_key not in library.tracks and e.guid in library.by_guid}

@@ -115,6 +115,7 @@ class LibraryTrack:
     album_genres: tuple[str, ...] = ()
     artist_genres: tuple[str, ...] = ()
     popularity: int | None = None  # Plex's ratingCount (Last.fm scrobbles), when known
+    section: str = ""  # the key of the music library it is in
 
     @property
     def genres(self) -> tuple[str, ...]:
@@ -179,6 +180,10 @@ class Gateway(Protocol):
 
     def library_tracks(self, url: str, token: str) -> list[LibraryTrack]:
         """Every track in the server's music libraries."""
+        ...
+
+    def music_sections(self, url: str, token: str) -> list[str]:
+        """The keys of the music libraries the token can see: all of them for the Owner, the shared ones for a Listener."""
         ...
 
     def ratings(self, url: str, token: str) -> dict[str, float]:
@@ -322,8 +327,13 @@ class PlexGateway:
         with _errors("Plex server"):
             return PlexServer(url, token, session=self._session)
 
-    def _music_sections(self, server: PlexServer):
+    def _music_libraries(self, server: PlexServer):
         return [s for s in server.library.sections() if s.type == "artist"]
+
+    def music_sections(self, url: str, token: str) -> list[str]:
+        server = self._server(url, token)
+        with _errors("Plex server"):
+            return [str(s.key) for s in self._music_libraries(server)]
 
     def history(self, url: str, token: str, account_id: int, since: datetime | None) -> list[HistoryEntry]:
         server = self._server(url, token)
@@ -348,7 +358,7 @@ class PlexGateway:
         # shortcut: assumes bulk listings carry Genre tags and ratingCount, unverified until tests/test_live_gateway.py runs against a live server
         server, tracks = self._server(url, token), []
         with _errors("Plex server"):
-            for section in self._music_sections(server):
+            for section in self._music_libraries(server):
                 artists = {str(a.ratingKey): _tags(a) for a in section.search(libtype="artist", container_size=PAGE)}
                 albums = {str(a.ratingKey): _tags(a) for a in section.search(libtype="album", container_size=PAGE)}
                 for t in section.search(libtype="track", container_size=PAGE):
@@ -367,6 +377,7 @@ class PlexGateway:
                             album_genres=albums.get(album_key, ()),
                             artist_genres=artists.get(artist_key, ()),
                             popularity=t.ratingCount,
+                            section=str(section.key),
                         )
                     )
         return tracks
@@ -374,7 +385,7 @@ class PlexGateway:
     def ratings(self, url: str, token: str) -> dict[str, float]:
         server, ratings = self._server(url, token), {}
         with _errors("Plex server"):
-            for section in self._music_sections(server):
+            for section in self._music_libraries(server):
                 for libtype in ("artist", "album", "track"):
                     for item in section.search(libtype=libtype, filters={"userRating>>": 0}, container_size=PAGE):
                         ratings[str(item.ratingKey)] = float(item.userRating)

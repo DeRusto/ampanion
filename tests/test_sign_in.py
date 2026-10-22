@@ -5,6 +5,8 @@ import json
 import logging
 from urllib.parse import parse_qs, urlsplit
 
+from fastapi.testclient import TestClient
+
 NO_SERVER = "This Plex account doesn&#39;t own a Plex Media Server"
 
 
@@ -70,6 +72,25 @@ def test_later_sign_ins_by_any_other_account_are_refused(client, gateway, sign_i
 
     assert response.status_code == 403
     assert client.get("/", follow_redirects=False).headers["location"] == "/signin"
+
+
+def test_of_two_first_sign_ins_at_once_the_one_finishing_first_is_the_owner(client, gateway, sign_in):
+    gateway.add_account("dee", token="owner-token")
+    gateway.add_server(owner_token="owner-token")
+    gateway.add_account("rival", token="rival-token")
+    gateway.add_server(owner_token="rival-token")
+    other = TestClient(client.app)
+
+    def dee_signs_in_meanwhile():  # while plex.tv answers the rival's server check
+        gateway.while_reading_resources = lambda: None
+        sign_in(other, "owner-token")
+
+    gateway.while_reading_resources = dee_signs_in_meanwhile
+    response = sign_in(client, "rival-token")
+
+    assert response.status_code == 403
+    assert client.get("/", follow_redirects=False).headers["location"] == "/signin"
+    assert other.get("/", follow_redirects=False).status_code == 200
 
 
 def test_an_abandoned_plex_sign_in_is_not_a_session(client, gateway):

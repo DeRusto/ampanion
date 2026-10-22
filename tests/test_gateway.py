@@ -337,6 +337,7 @@ def test_library_tracks_carry_their_album_and_artist_genres():
 
     assert (a.rating_key, a.guid, a.album_key, a.artist_key, a.genres, a.popularity) == ("30", "plex://track/a", "20", "10", ("Indie",), 5000)
     assert (b.artist, b.album_artist, b.album, b.genres, b.popularity) == ("Guest", "Band", "EP", ("Rock",), None)
+    assert a.section == "3" and real.music_sections(URL, "pal-token") == ["3"]
     listing = [r for r in requests_ if path(r) == "/library/sections/3/all"]
     assert {r.headers["X-Plex-Container-Size"] for r in listing} == {"1000"}  # a large container_size
     assert not [r for r in requests_ if path(r).startswith("/library/metadata")]  # autoreload off: no request per item

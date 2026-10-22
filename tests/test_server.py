@@ -127,7 +127,8 @@ def test_settings_show_the_chosen_server_and_the_signed_in_owner(client, gateway
 
 def test_a_manual_url_in_settings_overrides_the_discovered_connection(client, gateway, sign_in):
     gateway.add_account("owner", token="owner-token")
-    gateway.add_server(owner_token="owner-token", connections=[LOCAL])
+    server = gateway.add_server(owner_token="owner-token", connections=[LOCAL])
+    gateway.serve("http://plex.example:32400", server.client_identifier)
     sign_in(client, "owner-token")
     csrf = csrf_from(client.get("/settings").text)
 
@@ -137,6 +138,20 @@ def test_a_manual_url_in_settings_overrides_the_discovered_connection(client, ga
 
     client.post("/settings/server-url", data={"csrf_token": csrf, "url": ""})  # cleared: back to the discovered one
     assert shown_server_url(client) == LOCAL.uri
+
+
+def test_a_manual_url_must_answer_as_the_chosen_server(client, gateway, sign_in):
+    owner_with_two_servers(gateway)
+    gateway.serve("http://laptop.example:32400", "m2")
+    sign_in(client, "owner-token")
+    client.post("/server", data={"csrf_token": csrf_from(client.get("/").text), "machine_id": "m1"})
+    csrf = csrf_from(client.get("/settings").text)
+
+    other = client.post("/settings/server-url", data={"csrf_token": csrf, "url": "http://laptop.example:32400"})
+    nobody = client.post("/settings/server-url", data={"csrf_token": csrf, "url": "http://nothing.example:32400"})
+
+    assert other.status_code == 400 and nobody.status_code == 400
+    assert shown_server_url(client) == "http://m1.lan:32400"
 
 
 def test_a_manual_url_must_be_http(client, signed_in):

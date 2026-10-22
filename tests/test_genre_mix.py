@@ -166,6 +166,22 @@ def test_lowering_the_count_deletes_the_surplus_playlists_at_once(client, gatewa
     assert "Folk" not in client.get("/listeners/8").text
 
 
+def test_lowering_the_count_keeps_the_playlists_the_last_build_ranked_highest(client, gateway, clock, pal):
+    rock = genre(gateway, clock, "Rock", plays=40, track_genres=("Polka",))  # tagged Polka when its Plays synced
+    genre(gateway, clock, "Jazz", plays=30)
+    genre(gateway, clock, "Folk", plays=25)
+    refresh(client)
+    for key in rock:  # retagged in Plex: the next build ranks Rock first
+        band = key.rsplit("-", 1)[0].replace("Rock-", "Rock band ")
+        gateway.add_track(key, artist=band, album=band.replace("band", "LP"), track_genres=("Rock",))
+    refresh(client)
+    assert set(mixes(gateway)) == {"Rock Mix", "Jazz Mix", "Folk Mix"}
+
+    save_genre_mix(client, count="1")
+
+    assert set(mixes(gateway)) == {"Rock Mix"}
+
+
 def test_count_length_and_tracks_per_artist_are_editable_on_the_mixes_tab(client, gateway, clock, pal):
     genre(gateway, clock, "Rock", plays=40)
     genre(gateway, clock, "Jazz", plays=30)

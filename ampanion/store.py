@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS listeners (
     account_id INTEGER PRIMARY KEY,  -- plex.tv account id
     name       TEXT NOT NULL,
     added_at   TEXT NOT NULL,
-    first_fill_done INTEGER NOT NULL DEFAULT 0  -- their whole Plex history has been read once
+    plays_synced_at TEXT  -- the last successful Play sync; none until their whole Plex history has been read once
 );
 CREATE TABLE IF NOT EXISTS plays (
     account_id   INTEGER NOT NULL,
@@ -66,7 +66,8 @@ CREATE TABLE IF NOT EXISTS managed_playlists (
     tracks       TEXT NOT NULL DEFAULT '[]', -- JSON list of the rating keys last published
     status       TEXT NOT NULL,
     refreshed_at TEXT NOT NULL,
-    picked       TEXT NOT NULL DEFAULT '[]', -- JSON list of the rating keys last picked, published or held back
+    picked       TEXT NOT NULL DEFAULT '[]', -- JSON list of the guids (rating key if none) last picked, published or held back
+    rank         INTEGER NOT NULL DEFAULT 0, -- Genre Mix only: its genre's place in the last build, from 0
     PRIMARY KEY (account_id, mix, genre)
 );
 CREATE TABLE IF NOT EXISTS mix_builds (
@@ -125,7 +126,8 @@ class ManagedPlaylist:
     tracks: list[str]
     status: str
     refreshed_at: datetime
-    picked: list[str] = field(default_factory=list)  # the last Refresh's pick, even one held back: "previous" for rules
+    picked: list[str] = field(default_factory=list)  # guids of the last Refresh's pick, even one held back: "previous" for rules
+    rank: int = 0  # Genre Mix only: the genre's place among the Top Genres when last built
 
 
 @dataclass(frozen=True)
@@ -206,14 +208,18 @@ class Store:
         """The Owner's Plex token: a full-account credential, never logged or sent to the browser."""
         return self._setting("owner_token")
 
-    def set_owner(self, account_id: int, username: str, token: str) -> None:
-        """Store the Owner and their token; a new token is never an expired one."""
+    def claim_owner(self, account_id: int, username: str, token: str) -> bool:
+        """Store the Owner and their token, unless another account is already the Owner (False).
+
+        One transaction, so of two first sign-ins at once only one becomes the Owner. A new token is never an expired one.
+        """
         with self.connect() as db:
-            db.executemany(
-                "INSERT OR REPLACE INTO app_settings VALUES (?, ?)",
-                [("owner_account_id", str(account_id)), ("owner_username", username), ("owner_token", token)],
-            )
+            db.execute("INSERT OR IGNORE INTO app_settings VALUES ('owner_account_id', ?)", (str(account_id),))
+            if db.execute("SELECT value FROM app_settings WHERE key = 'owner_account_id'").fetchone()[0] != str(account_id):
+                return False
+            db.executemany("INSERT OR REPLACE INTO app_settings VALUES (?, ?)", [("owner_username", username), ("owner_token", token)])
             db.execute("DELETE FROM app_settings WHERE key = 'owner_token_expired'")
+        return True
 
     @property
     def owner_token_expired(self) -> bool:
@@ -318,7 +324,7 @@ class Store:
 
     def add_listener(self, account_id: int, name: str, added_at: datetime) -> None:
         with self.connect() as db:
-            db.execute("INSERT OR IGNORE INTO listeners VALUES (?, ?, ?, 0)", (account_id, name, added_at.isoformat()))
+            db.execute("INSERT OR IGNORE INTO listeners VALUES (?, ?, ?, NULL)", (account_id, name, added_at.isoformat()))
 
     def remove_listener(self, account_id: int) -> None:
         """Forget everything stored for the Listener. Later tables (Plays, Skips, Mix settings...) are deleted here too."""
@@ -328,15 +334,16 @@ class Store:
 
     # --- Listening history ---
 
-    def first_fill_done(self, account_id: int) -> bool:
+    def plays_synced(self, account_id: int) -> datetime | None:
+        """When the Listener's Plays were last synced; None before their first fill."""
         with self.connect() as db:
-            row = db.execute("SELECT first_fill_done FROM listeners WHERE account_id = ?", (account_id,)).fetchone()
-        return bool(row and row[0])
+            row = db.execute("SELECT plays_synced_at FROM listeners WHERE account_id = ?", (account_id,)).fetchone()
+        return datetime.fromisoformat(row[0]) if row and row[0] else None
 
-    def add_plays(self, account_id: int, plays: list[tuple[str, Play]]) -> None:
-        """Insert (historyKey, Play) pairs, leaving ones already stored; the Listener's first fill is then done."""
+    def add_plays(self, account_id: int, plays: list[tuple[str, Play]], synced_at: datetime) -> None:
+        """Insert (historyKey, Play) pairs, leaving ones already stored, and note when this sync ran."""
         with self.connect() as db:
-            db.execute("UPDATE listeners SET first_fill_done = 1 WHERE account_id = ?", (account_id,))
+            db.execute("UPDATE listeners SET plays_synced_at = ? WHERE account_id = ?", (synced_at.isoformat(), account_id))
             db.executemany(
                 "INSERT OR IGNORE INTO plays VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
@@ -403,12 +410,12 @@ class Store:
     def managed_playlists(self, account_id: int, mix: str) -> list[ManagedPlaylist]:
         with self.connect() as db:
             rows = db.execute(
-                "SELECT mix, genre, playlist_id, tracks, status, refreshed_at, picked FROM managed_playlists"
+                "SELECT mix, genre, playlist_id, tracks, status, refreshed_at, picked, rank FROM managed_playlists"
                 " WHERE account_id = ? AND mix = ? ORDER BY genre",
                 (account_id, mix),
             ).fetchall()
         return [
-            ManagedPlaylist(r[0], r[1] or None, r[2], json.loads(r[3]), r[4], datetime.fromisoformat(r[5]), json.loads(r[6]))
+            ManagedPlaylist(r[0], r[1] or None, r[2], json.loads(r[3]), r[4], datetime.fromisoformat(r[5]), json.loads(r[6]), r[7])
             for r in rows
         ]
 
@@ -416,10 +423,10 @@ class Store:
         p = playlist
         with self.connect() as db:
             db.execute(
-                "INSERT OR REPLACE INTO managed_playlists VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR REPLACE INTO managed_playlists VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     account_id, p.mix, p.genre or "", p.playlist_id, json.dumps(p.tracks), p.status,
-                    p.refreshed_at.isoformat(), json.dumps(p.picked),
+                    p.refreshed_at.isoformat(), json.dumps(p.picked), p.rank,
                 ),
             )
 

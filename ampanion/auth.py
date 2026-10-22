@@ -97,7 +97,8 @@ def add_sign_in_routes(
             return page(request, "Couldn't reach Plex. Try again.", 502)
 
         resume = store.owner_token_expired
-        store.set_owner(account.id, account.username, token)
+        if not store.claim_owner(account.id, account.username, token):  # another first sign-in got there first
+            return page(request, "Only ampanion's Owner can sign in.", 403)
         if resume:
             scheduler.catch_up()
         request.session.clear()

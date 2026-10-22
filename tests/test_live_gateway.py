@@ -1,5 +1,7 @@
 """The Gateway contract against a live Plex server (and Tautulli): run by hand, never in CI.
 
+It drives the real PlexGateway, so python-plexapi for plex.tv and the server, httpx for the PIN calls and Tautulli.
+
 Skipped unless AMPANION_LIVE_PLEX_URL and AMPANION_LIVE_PLEX_TOKEN (the Owner's token) are set.
 Optional: AMPANION_LIVE_FRIEND (plex.tv username of a friend, not Home, with a share on the server),
 AMPANION_LIVE_TAUTULLI_URL + AMPANION_LIVE_TAUTULLI_KEY, and AMPANION_LIVE_LATE_PLAY
@@ -162,8 +164,23 @@ def test_bulk_track_listings_carry_the_genres_and_popularity_of_the_items_themse
         pytest.skip("no sampled track, album or artist has genre tags, so the bulk listing was not really compared")
 
 
+def test_tracks_name_a_music_library_the_owner_sees(gateway, tracks):
+    sections = gateway.music_sections(URL, TOKEN)
+    assert sections and {t.section for t in tracks} <= set(sections)
+
+
+def test_a_friend_sees_only_their_shared_music_libraries(gateway, friend):
+    _, token = friend
+    assert set(gateway.music_sections(URL, token)) <= set(gateway.music_sections(URL, TOKEN))
+
+
+def test_a_server_refusing_the_token_is_told_apart(gateway):
+    with pytest.raises(TokenExpired):
+        gateway.playlists(URL, "not-a-real-token")
+
+
 def test_ratings_are_only_rated_items_on_the_star_scale(gateway):
-    # Checks Plex decodes the "userRating>" key: ignored, unrated items would come back and fail to parse.
+    # Checks plexapi's validated "userRating>>" filter: ignored, unrated items would come back and fail to parse.
     assert all(0 < r <= 10 for r in gateway.ratings(URL, TOKEN).values())
 
 
