@@ -2,6 +2,7 @@ from pathlib import Path
 from random import Random
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -87,5 +88,15 @@ def create_app(*, config_dir: Path, gateway: Gateway, clock: Clock, rng: Random)
     @app.get("/settings")
     def settings(request: Request):
         return templates.TemplateResponse(request, "settings.html", {"page": "settings", "store": store})
+
+    @app.get("/settings/reset")
+    def confirm_reset(request: Request):
+        return templates.TemplateResponse(request, "reset.html", {"page": "settings"})
+
+    @app.post("/settings/reset")
+    def reset(request: Request):
+        store.reset()  # Playlists on Plex stay: re-adding a Listener on the same server takes them over by marker
+        request.session.clear()
+        return RedirectResponse("/signin", 303)
 
     return app

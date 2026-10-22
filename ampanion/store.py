@@ -125,6 +125,16 @@ class Store:
         finally:
             db.close()
 
+    def reset(self) -> None:
+        """Back to first run: empty every table, keeping only the identity ampanion generated for itself."""
+        with self.connect() as db:
+            tables = [r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite%'")]
+            for table in tables:  # every table, so ones added later are wiped too
+                if table == "app_settings":
+                    db.execute("DELETE FROM app_settings WHERE key NOT IN ('client_identifier', 'session_secret')")
+                else:
+                    db.execute(f"DELETE FROM {table}")
+
     def ping(self) -> None:
         with self.connect() as db:
             db.execute("SELECT 1")
