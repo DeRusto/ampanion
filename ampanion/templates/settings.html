@@ -23,4 +23,22 @@
     <button type="submit">Sign out</button>
   </form>
 </section>
+<section>
+  <h2>Schedule</h2>
+  <form method="post" action="/settings/schedule">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Nightly run time (in the server's TZ)
+      <input type="time" name="run_time" value="{{ store.run_time.strftime('%H:%M') }}" required>
+    </label>
+    {% for mix in mixes %}
+    <label>{{ mix.title }}
+      <select name="{{ mix.key }}">
+        <option value="daily"{% if cadences[mix.key] == 'daily' %} selected{% endif %}>Daily</option>
+        <option value="weekly"{% if cadences[mix.key] == 'weekly' %} selected{% endif %}>Weekly, on Mondays</option>
+      </select>
+    </label>
+    {% endfor %}
+    <button type="submit">Save</button>
+  </form>
+</section>
 {% endblock %}

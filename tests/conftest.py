@@ -26,11 +26,17 @@ def clock():
 
 
 @pytest.fixture
-def start_app(config_dir, gateway, clock):
+def tz():
+    """The TZ ampanion runs in; a test module overrides this fixture to try another."""
+    return timezone.utc
+
+
+@pytest.fixture
+def start_app(config_dir, gateway, clock, tz):
     """Build ampanion on the fakes. Call it again to simulate a restart on the same /config."""
 
     def start():
-        app = create_app(config_dir=config_dir, gateway=gateway, clock=clock, rng=random.Random(1234))
+        app = create_app(config_dir=config_dir, gateway=gateway, clock=clock, rng=random.Random(1234), tz=tz)
         return TestClient(app)
 
     return start

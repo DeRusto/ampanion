@@ -14,4 +14,9 @@ def mix_config(store: Store, account_id: int, mix: Mix) -> tuple[bool, dict[str,
     return enabled, {s.key: saved.get(s.key, s.default) for s in mix.settings}
 
 
-__all__ = ["MIXES", "Mix", "MixInput", "Rule", "Setting", "mix_config"]
+def mix_cadence(store: Store, mix: Mix) -> str:
+    """The Mix's server-wide cadence, "daily" or "weekly": the Owner's choice in Settings, else the Mix's default."""
+    return store.cadence(mix.key) or mix.cadence
+
+
+__all__ = ["MIXES", "Mix", "MixInput", "Rule", "Setting", "mix_cadence", "mix_config"]

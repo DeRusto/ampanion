@@ -25,4 +25,5 @@ ON_REPEAT = Mix(
     title="On Repeat",
     rule=rule,
     settings=(Setting("window_days", "Window (days)", 30, max=3650), Setting("length", "Length", 30)),
+    cadence="daily",
 )

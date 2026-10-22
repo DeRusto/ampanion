@@ -1,0 +1,6 @@
+{# A Refresh now button: disabled, showing progress, while a run is in progress. Set action and label. #}
+<form method="post" action="{{ action }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit"{% if scheduler.busy %} disabled{% endif %}>{{ label }}</button>
+  {% if scheduler.busy %}<span class="progress" role="status">{{ scheduler.progress }}</span>{% endif %}
+</form>

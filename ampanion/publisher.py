@@ -4,7 +4,7 @@ from dataclasses import replace
 from datetime import datetime
 
 from ampanion.gateway import Gateway
-from ampanion.mixes import Mix
+from ampanion.mixes import Mix, mix_cadence
 from ampanion.store import ManagedPlaylist, Store
 
 MIN_TRACKS = 5
@@ -22,9 +22,8 @@ def playlist_title(mix: Mix, genre: str | None) -> str:
     return mix.title if genre is None else f"{genre} Mix"
 
 
-def summary_marker(title: str) -> str:
-    # shortcut: always says "daily", the scheduling ticket (#34) names the Mix's cadence
-    return f"Made by ampanion: {title}. Refreshed daily; edits are replaced."
+def summary_marker(title: str, cadence: str) -> str:
+    return f"Made by ampanion: {title}. Refreshed {cadence}; edits are replaced."
 
 
 def publish(
@@ -54,6 +53,6 @@ def publish(
         rest = tracks[CHUNK:]
     for i in range(0, len(rest), CHUNK):
         gateway.add_to_playlist(url, token, machine_id, playlist_id, rest[i : i + CHUNK])
-    gateway.set_playlist_summary(url, token, playlist_id, summary_marker(title))
+    gateway.set_playlist_summary(url, token, playlist_id, summary_marker(title, mix_cadence(store, mix)))
     store.save_managed_playlist(account_id, ManagedPlaylist(mix.key, genre, playlist_id, tracks, status, now))
     return status
