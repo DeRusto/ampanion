@@ -1,10 +1,7 @@
 """Deep Cuts: tracks a Listener has played at most once, by their Top Artists, capped per artist and spread out."""
 
-import random
-
 import pytest
 
-from ampanion.mixes.artists import spread_shuffle
 from tests.test_listeners import add_listener
 from tests.test_on_repeat import PAL, play, refresh
 from tests.test_sign_in import csrf_from
@@ -127,13 +124,21 @@ def test_a_short_result_is_published_as_it_is(client, gateway, clock, pal):
     assert "6 of 30 tracks (not enough history)" in client.get("/listeners/8").text
 
 
-def test_the_shuffle_spreads_artists_where_the_mix_allows_it():
-    for seed in range(200):
-        rng = random.Random(seed)
-        tracks = [f"{a}{n}" for a, count in zip("abcde", rng.sample(range(1, 7), 5)) for n in range(count)]
-        ordered = spread_shuffle(tracks, lambda t: t[0], rng)
-        assert sorted(ordered) == sorted(tracks)
-        assert all(x[0] != y[0] for x, y in zip(ordered, ordered[1:]))
+def test_the_shuffle_spreads_artists_where_the_mix_allows_it(client, gateway, clock, pal):
+    for i, cuts in enumerate((1, 3, 6, 2, 5)):  # uneven artists, but none with over half the tracks
+        artist_with(gateway, clock, f"Band{i}", tracks=cuts + 1, plays=12)
+    save_deep_cuts(client, tracks_per_artist="10")
 
-    ordered = spread_shuffle(["a1", "a2", "a3", "b1", "b2"], lambda t: t[0], random.Random(7))
-    assert [t[0] for t in ordered] == ["a", "b", "a", "b", "a"]
+    for _ in range(10):
+        refresh(client)
+        artists = [artist_of(gateway, k) for k in deep_cuts(gateway).items]
+        assert len(artists) == 17 and all(a != b for a, b in zip(artists, artists[1:]))
+
+
+def test_an_artist_with_one_track_more_than_the_rest_starts_and_ends_the_playlist(client, gateway, clock, pal):
+    artist_with(gateway, clock, "Big", tracks=4, plays=12)  # 3 cuts
+    artist_with(gateway, clock, "Small", tracks=3, plays=12)  # 2 cuts
+
+    refresh(client)
+
+    assert [artist_of(gateway, k) for k in deep_cuts(gateway).items] == ["Big", "Small", "Big", "Small", "Big"]
