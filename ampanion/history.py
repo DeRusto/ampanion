@@ -30,7 +30,7 @@ def sync(
                 e.history_key,
                 Play(
                     e.played_at, e.rating_key, getattr(library.tracks.get(e.rating_key), "guid", None),
-                    e.title, e.artist, e.album_artist, e.album,
+                    e.title, e.artist, e.album_artist, e.album, getattr(library.tracks.get(e.rating_key), "genres", ()),
                 ),
             )
             for e in entries

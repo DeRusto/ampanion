@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS plays (
     artist       TEXT NOT NULL,
     album_artist TEXT NOT NULL,
     album        TEXT NOT NULL,
+    genres       TEXT NOT NULL DEFAULT '[]',  -- JSON list: the track's genres when the Play was synced
     PRIMARY KEY (account_id, history_key)
 );
 CREATE TABLE IF NOT EXISTS skips (
@@ -99,6 +100,7 @@ class Play:
     artist: str
     album_artist: str
     album: str
+    genres: tuple[str, ...] = ()  # snapshot, so Top Genres still count the Play once its track is gone
 
 
 @dataclass(frozen=True)
@@ -331,9 +333,9 @@ class Store:
         """Insert (historyKey, Play) pairs; ones already stored are left as they are."""
         with self.connect() as db:
             db.executemany(
-                "INSERT OR IGNORE INTO plays VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT OR IGNORE INTO plays VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
-                    (account_id, key, p.played_at.isoformat(), p.rating_key, p.guid, p.title, p.artist, p.album_artist, p.album)
+                    (account_id, key, p.played_at.isoformat(), p.rating_key, p.guid, p.title, p.artist, p.album_artist, p.album, json.dumps(p.genres))
                     for key, p in plays
                 ],
             )
@@ -341,10 +343,10 @@ class Store:
     def plays(self, account_id: int) -> list[Play]:
         with self.connect() as db:
             rows = db.execute(
-                "SELECT played_at, rating_key, guid, title, artist, album_artist, album FROM plays WHERE account_id = ?",
+                "SELECT played_at, rating_key, guid, title, artist, album_artist, album, genres FROM plays WHERE account_id = ?",
                 (account_id,),
             ).fetchall()
-        return [Play(datetime.fromisoformat(r[0]), *r[1:]) for r in rows]
+        return [Play(datetime.fromisoformat(r[0]), *r[1:7], tuple(json.loads(r[7]))) for r in rows]
 
     def relink_plays(self, account_id: int, guid: str, rating_key: str) -> None:
         with self.connect() as db:

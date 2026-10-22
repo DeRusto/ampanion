@@ -12,7 +12,7 @@ def top_genres(mix: MixInput, count: int) -> list[str]:
     """Genres by all-time Plays (a track counts toward each of its genres), at least 20, ties to the latest Play."""
     plays, latest, tracks = Counter(), {}, mix.library.tracks
     for p in mix.plays:
-        for g in tracks[p.rating_key].genres if p.rating_key in tracks else ():
+        for g in tracks[p.rating_key].genres if p.rating_key in tracks else p.genres:
             plays[g] += 1
             latest[g] = max(latest.get(g, p.played_at), p.played_at)
     ranked = sorted((g for g, n in plays.items() if n >= TOP_GENRE_PLAYS), key=lambda g: (plays[g], latest[g]), reverse=True)

@@ -70,6 +70,16 @@ def test_genre_mix_playlists_never_put_two_tracks_by_one_artist_side_by_side(cli
         assert len(artists) == 12 and all(a != b for a, b in zip(artists, artists[1:]))
 
 
+def test_plays_of_a_track_gone_from_the_library_still_count_toward_top_genres(client, gateway, clock, pal):
+    rock = genre(gateway, clock, "Rock", plays=25)
+    refresh(client)
+
+    gateway.remove_track(rock[0])  # every Rock Play was of this track
+    refresh(client)
+
+    assert set(mixes(gateway)) == {"Rock Mix"} and rock[0] not in mixes(gateway)["Rock Mix"].items
+
+
 def test_no_playlist_when_no_genre_has_20_plays(client, gateway, clock, pal):
     genre(gateway, clock, "Rock", plays=19)
 
