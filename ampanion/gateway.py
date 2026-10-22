@@ -7,6 +7,7 @@ Each operation raises a GatewayError subclass the caller can tell apart.
 
 from dataclasses import dataclass
 from typing import Protocol
+from xml.etree import ElementTree
 
 import httpx
 
@@ -82,6 +83,14 @@ class Gateway(Protocol):
         """The machineIdentifier of the Plex server answering at url. Raises Unreachable if none answers."""
         ...
 
+    def users(self, token: str) -> list[PlexAccount]:
+        """The token's friends and Home members (not the account itself), named by their display title."""
+        ...
+
+    def shared_tokens(self, token: str, machine_id: str) -> dict[int, str]:
+        """Server tokens by plex.tv account id for the users with a share on the server (python-plexapi's switchUser)."""
+        ...
+
 
 class PlexGateway:
     """The real Gateway, over HTTP."""
@@ -90,23 +99,34 @@ class PlexGateway:
         self._client_identifier = client_identifier
         self._http = http or httpx.Client(timeout=30)
 
-    def _plex_tv(self, method: str, path: str, token: str | None = None, **kwargs):
+    def _plex_tv_response(self, method: str, url: str, token: str | None, accept="application/json", **kwargs):
         headers = {
-            "Accept": "application/json",
+            "Accept": accept,
             "X-Plex-Client-Identifier": self._client_identifier,
             "X-Plex-Product": "ampanion",
         }
         if token:
             headers["X-Plex-Token"] = token
         try:
-            response = self._http.request(method, f"https://plex.tv/api/v2{path}", headers=headers, **kwargs)
+            response = self._http.request(method, url, headers=headers, **kwargs)
         except httpx.HTTPError as e:
             raise Unreachable(f"plex.tv: {e}") from e
         if response.status_code == 401:
             raise TokenExpired("plex.tv rejected the token")
         if response.is_error:
             raise Unreachable(f"plex.tv answered {response.status_code}")
-        return response.json()
+        return response
+
+    def _plex_tv(self, method: str, path: str, token: str | None = None, **kwargs):
+        return self._plex_tv_response(method, f"https://plex.tv/api/v2{path}", token, **kwargs).json()
+
+    def _plex_tv_xml(self, path: str, token: str) -> ElementTree.Element:
+        """plex.tv's older /api endpoints, which answer only in XML."""
+        response = self._plex_tv_response("GET", f"https://plex.tv/api{path}", token, accept="application/xml")
+        try:
+            return ElementTree.fromstring(response.content)
+        except ElementTree.ParseError as e:
+            raise Unreachable(f"plex.tv answered unreadable XML: {e}") from e
 
     def check_token(self, token: str) -> PlexAccount:
         body = self._plex_tv("GET", "/user", token)
@@ -143,3 +163,13 @@ class PlexGateway:
             return response.json()["MediaContainer"]["machineIdentifier"]
         except (httpx.HTTPError, ValueError, KeyError) as e:
             raise Unreachable(f"Plex server at {url}: {e}") from e
+
+    def users(self, token: str) -> list[PlexAccount]:
+        return [
+            PlexAccount(id=int(u.get("id")), username=u.get("title") or u.get("username"))
+            for u in self._plex_tv_xml("/users", token).iter("User")
+        ]
+
+    def shared_tokens(self, token: str, machine_id: str) -> dict[int, str]:
+        shares = self._plex_tv_xml(f"/servers/{machine_id}/shared_servers", token).iter("SharedServer")
+        return {int(s.get("userID")): s.get("accessToken") for s in shares if s.get("accessToken")}

@@ -42,3 +42,15 @@ main { flex: 1; max-width: 960px; padding: 16px 24px; }
 .checklist li { margin-bottom: 8px; }
 .checklist li.done { color: var(--dim); }
 .checklist li.done::marker { content: "\2713  "; color: var(--ok); }
+
+.sidebar .add { display: flex; align-items: center; justify-content: space-between; margin: 0; }
+.sidebar .add button { background: none; border: 1px solid var(--line); border-radius: 4px; color: var(--accent); cursor: pointer; font-weight: 700; }
+.sidebar .unavailable { color: var(--dim); }
+.sidebar .unavailable small { display: block; font-size: 11px; }
+.sidebar .error, .error { color: var(--bad); }
+
+.listener { display: flex; align-items: center; gap: 12px; }
+.listener h1 { margin-right: auto; }
+.tabs { display: flex; gap: 16px; border-bottom: 1px solid var(--line); margin: 12px 0; }
+.tabs a { padding: 6px 0; color: var(--dim); text-decoration: none; }
+.tabs a.on { color: var(--text); box-shadow: inset 0 -2px var(--accent); }

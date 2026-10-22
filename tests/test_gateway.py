@@ -114,3 +114,47 @@ def test_a_plex_server_names_its_machine_id_or_is_unreachable():
     assert fake.server_identity("http://m1.lan:32400", "owner-token") == "m1"
     with pytest.raises(Unreachable):
         fake.server_identity("http://elsewhere:32400", "owner-token")
+
+
+def xml_plex_tv(body: str) -> tuple[PlexGateway, list[httpx.Request]]:
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(200, text=body, headers={"Content-Type": "application/xml"})
+
+    return PlexGateway(client_identifier="test-client", http=httpx.Client(transport=httpx.MockTransport(handle))), requests
+
+
+def test_users_are_the_owners_friends_and_home_members_by_display_name():
+    real, requests = xml_plex_tv(
+        '<MediaContainer><User id="7" title="Kid" username="" />'
+        '<User id="8" title="Pal" username="pal1"><Server machineIdentifier="m1" /></User></MediaContainer>'
+    )
+    expected = [PlexAccount(id=7, username="Kid"), PlexAccount(id=8, username="Pal")]
+    assert real.users("owner-token") == expected
+    assert str(requests[0].url) == "https://plex.tv/api/users"
+    assert requests[0].headers["X-Plex-Token"] == "owner-token"
+
+    fake = fake_with_owner()
+    fake.add_user("owner-token", "Kid", account_id=7)
+    fake.add_user("owner-token", "Pal", account_id=8)
+    assert fake.users("owner-token") == expected
+
+
+def test_shared_tokens_are_the_server_tokens_of_users_with_a_share_on_that_server():
+    real, requests = xml_plex_tv(
+        '<MediaContainer><SharedServer userID="8" username="pal1" accessToken="pal-server-token" /></MediaContainer>'
+    )
+    assert real.shared_tokens("owner-token", "m1") == {8: "pal-server-token"}
+    assert str(requests[0].url) == "https://plex.tv/api/servers/m1/shared_servers"
+    with pytest.raises(Unreachable):
+        xml_plex_tv("<not xml")[0].shared_tokens("owner-token", "m1")
+    with pytest.raises(TokenExpired):
+        plex_tv(401).shared_tokens("owner-token", "m1")
+
+    fake = fake_with_owner()
+    server = fake.add_server(owner_token="owner-token", machine_id="m1")
+    fake.add_user("owner-token", "Kid", account_id=7)
+    fake.add_user("owner-token", "Pal", account_id=8, share=server)
+    assert fake.shared_tokens("owner-token", "m1") == {8: "Pal-server-token"}

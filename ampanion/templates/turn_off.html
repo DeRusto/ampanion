@@ -1,0 +1,11 @@
+{% extends "layout.html" %}
+{% block title %}Turn off {{ listener.name }}{% endblock %}
+{% block main %}
+<h1>Turn off {{ listener.name }}?</h1>
+<p>Their Playlists will be deleted from Plex, and ampanion forgets their Listening history and settings.</p>
+<form method="post" action="/listeners/{{ listener.account_id }}/turn-off">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <button type="submit" class="danger">Turn off {{ listener.name }}</button>
+  <a href="/listeners/{{ listener.account_id }}">Cancel</a>
+</form>
+{% endblock %}

@@ -1,0 +1,19 @@
+{% extends "layout.html" %}
+{% block title %}{{ listener.name }}{% endblock %}
+{% block main %}
+<header class="listener">
+  <h1>{{ listener.name }}</h1>
+  <button type="button" disabled title="Refreshes arrive in a later version">Refresh now</button>
+  <a class="button" href="/listeners/{{ listener.account_id }}/turn-off">Turn off</a>
+</header>
+<nav class="tabs">
+  {% for t in tabs %}
+  <a class="{% if t == tab %}on{% endif %}" href="?tab={{ t }}">{{ t | capitalize }}</a>
+  {% endfor %}
+</nav>
+<section>
+  {% if tab == 'mixes' %}<p>No Mixes yet.</p>
+  {% elif tab == 'playlists' %}<p>ampanion hasn't made any Playlists for {{ listener.name }} yet.</p>
+  {% else %}<p>No Refreshes yet.</p>{% endif %}
+</section>
+{% endblock %}

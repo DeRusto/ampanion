@@ -21,6 +21,8 @@ class FakeGateway:
         self._resources_by_account: dict[int, list[PlexResource]] = {}
         self._pins: dict[int, FakePin] = {}
         self._servers_by_uri: dict[str, str] = {}  # uri -> machineIdentifier of the server answering there
+        self._users_by_account: dict[int, list[PlexAccount]] = {}
+        self._shared_tokens: dict[str, dict[int, str]] = {}  # machineIdentifier -> {account id: server token}
         self._ids = itertools.count(1)
 
     # --- set up the world ---
@@ -69,6 +71,16 @@ class FakeGateway:
         resources = self._resources_by_account[self.check_token(token).id]
         resources[:] = [replace(r, owned=False) if r.client_identifier == machine_id else r for r in resources]
 
+    def add_user(
+        self, owner_token: str, username: str, account_id: int | None = None, share: PlexResource | None = None
+    ) -> PlexAccount:
+        """A friend or Home member of the account holding owner_token, with a library share on `share` if given."""
+        user = self.add_account(username, token=f"{username}-token", account_id=account_id)
+        self._users_by_account.setdefault(self.check_token(owner_token).id, []).append(user)
+        if share is not None:
+            self._shared_tokens.setdefault(share.client_identifier, {})[user.id] = f"{username}-server-token"
+        return user
+
     def approve_pin(self, code: str, token: str) -> None:
         """The person signs in on Plex's auth page, which attaches their token to the PIN."""
         self.pin_by_code(code).token = token
@@ -101,6 +113,13 @@ class FakeGateway:
         if url not in self._servers_by_uri:
             raise Unreachable(f"Plex server at {url}: connection refused")
         return self._servers_by_uri[url]
+
+    def users(self, token: str) -> list[PlexAccount]:
+        return list(self._users_by_account.get(self.check_token(token).id, []))
+
+    def shared_tokens(self, token: str, machine_id: str) -> dict[int, str]:
+        self.check_token(token)
+        return dict(self._shared_tokens.get(machine_id, {}))
 
 
 class FakeClock:

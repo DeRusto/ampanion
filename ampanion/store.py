@@ -5,6 +5,8 @@ import sqlite3
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 SCHEMA = """
@@ -12,7 +14,19 @@ CREATE TABLE IF NOT EXISTS app_settings (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS listeners (
+    account_id INTEGER PRIMARY KEY,  -- plex.tv account id
+    name       TEXT NOT NULL,
+    added_at   TEXT NOT NULL
+);
 """
+
+
+@dataclass(frozen=True)
+class Listener:
+    account_id: int
+    name: str
+
 
 
 class Store:
@@ -106,3 +120,20 @@ class Store:
     def set_server_manual_url(self, url: str | None) -> None:
         with self.connect() as db:
             db.execute("INSERT OR REPLACE INTO app_settings VALUES ('server_manual_url', ?)", (url or "",))
+
+    def listeners(self) -> list[Listener]:
+        with self.connect() as db:
+            rows = db.execute("SELECT account_id, name FROM listeners ORDER BY added_at").fetchall()
+        return [Listener(*row) for row in rows]
+
+    def listener(self, account_id: int) -> Listener | None:
+        return next((l for l in self.listeners() if l.account_id == account_id), None)
+
+    def add_listener(self, account_id: int, name: str, added_at: datetime) -> None:
+        with self.connect() as db:
+            db.execute("INSERT OR IGNORE INTO listeners VALUES (?, ?, ?)", (account_id, name, added_at.isoformat()))
+
+    def remove_listener(self, account_id: int) -> None:
+        """Forget everything stored for the Listener. Later tables (Plays, Skips, Mix settings...) are deleted here too."""
+        with self.connect() as db:
+            db.execute("DELETE FROM listeners WHERE account_id = ?", (account_id,))
