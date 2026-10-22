@@ -221,8 +221,8 @@ def test_an_unreachable_tautulli_fails_the_refresh_but_mixes_use_the_skips_alrea
     refresh(client)
 
     assert sorted(playlist(gateway, "Deep Cuts").items) == keys[2:7]
-    latest = client.app.state.store.refreshes(8)[0]
-    assert latest.outcome == "failed" and "read Skips from Tautulli" in client.get("/listeners/8?tab=history").text
+    newest = client.get("/listeners/8?tab=history").text.split("<tbody>")[1].split("</tr>")[0]
+    assert '<tr class="failed">' in newest and "read Skips from Tautulli" in newest
 
 
 def test_turning_a_listener_off_forgets_their_skips(client, gateway, clock, pal):

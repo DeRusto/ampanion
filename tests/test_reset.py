@@ -24,8 +24,7 @@ def test_reset_asks_for_confirmation_first(client, gateway, clock, pal):
     page = client.get("/settings/reset")
 
     assert "Reset ampanion?" in page.text
-    assert client.app.state.store.listeners()  # nothing wiped yet
-    assert client.get("/listeners/8").status_code == 200
+    assert client.get("/listeners/8").status_code == 200  # nothing wiped yet
 
 
 def test_after_reset_ampanion_is_at_first_run_and_the_next_qualifying_sign_in_becomes_owner(client, gateway, sign_in, pal):
@@ -35,11 +34,11 @@ def test_after_reset_ampanion_is_at_first_run_and_the_next_qualifying_sign_in_be
     assert client.get("/", follow_redirects=False).headers["location"] == "/signin"
     gateway.add_account("newcomer", token="new-token", account_id=77)
     gateway.add_server(owner_token="new-token", name="Attic")
-    sign_in(client, "new-token")
-    store = client.app.state.store
-    assert (store.owner_account_id, store.owner_username) == (77, "newcomer")
-    assert store.listeners() == [] and store.refreshes() == []
-    assert store.server_name == "Attic"  # the server was forgotten, and the new Owner's one was chosen
+    home = sign_in(client, "new-token").text
+    assert "Signed in as newcomer" in client.get("/settings").text
+    assert "<b>Attic</b>" in client.get("/settings").text  # the server was forgotten, and the new Owner's one chosen
+    assert "No Refreshes yet." in home and 'href="/listeners/' not in home  # no Listeners or Refresh records
+    assert client.get("/listeners/8").status_code == 404
 
 
 def test_reset_leaves_playlists_on_plex(client, gateway, clock, pal):

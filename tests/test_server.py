@@ -76,11 +76,17 @@ REMOTE = PlexConnection(uri="https://1-2-3-4.abc.plex.direct:32400", local=False
 RELAY = PlexConnection(uri="https://relay.plex.direct:8443", local=False, relay=True)
 
 
+def shown_server_url(client):
+    """The server URL Settings says ampanion reaches Plex at, or None if it couldn't reach it."""
+    html = client.get("/settings").text
+    return None if "couldn't be reached" in html else html.split("</b>\n    at ")[1].split("</p>")[0]
+
+
 def server_url_once_picked(client, gateway, sign_in, connections, answering):
     gateway.add_account("owner", token="owner-token")
     gateway.add_server(owner_token="owner-token", machine_id="m1", connections=connections, answering=answering)
     sign_in(client, "owner-token")  # lands on Home, which picks the only server
-    return client.app.state.store.server_url
+    return shown_server_url(client)
 
 
 def test_local_connections_are_tried_before_remote(client, gateway, sign_in):
@@ -127,10 +133,10 @@ def test_a_manual_url_in_settings_overrides_the_discovered_connection(client, ga
 
     html = client.post("/settings/server-url", data={"csrf_token": csrf, "url": "http://plex.example:32400"}).text
     assert "at http://plex.example:32400" in html
-    assert client.app.state.store.server_url == "http://plex.example:32400"
+    assert shown_server_url(client) == "http://plex.example:32400"
 
     client.post("/settings/server-url", data={"csrf_token": csrf, "url": ""})  # cleared: back to the discovered one
-    assert client.app.state.store.server_url == LOCAL.uri
+    assert shown_server_url(client) == LOCAL.uri
 
 
 def test_a_manual_url_must_be_http(client, signed_in):

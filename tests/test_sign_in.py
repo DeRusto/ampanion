@@ -26,7 +26,7 @@ def test_sign_in_sends_the_browser_to_plex_with_a_callback_on_the_url_it_used(cl
 
     params = plex_auth_params(response)
     assert params["forwardUrl"] == "http://ampanion.lan:8484/signin/callback"
-    assert params["clientID"] == client.app.state.store.client_identifier
+    assert params["clientID"]  # ampanion's own client identifier (see test_first_run.py)
     assert gateway.pin_by_code(params["code"])  # a PIN made on plex.tv
 
 
