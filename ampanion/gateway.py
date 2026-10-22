@@ -5,6 +5,8 @@ in-memory fake (tests/fakes.py) and drive the rest of the app for real.
 Each operation raises a GatewayError subclass the caller can tell apart.
 """
 
+import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Protocol
@@ -12,6 +14,22 @@ from urllib.parse import quote
 from xml.etree import ElementTree
 
 import httpx
+import requests
+
+os.environ["PLEXAPI_PLEXAPI_AUTORELOAD"] = "false"  # read per object: a partial item must never fetch itself again
+
+import plexapi  # noqa: E402
+from plexapi.audio import Track  # noqa: E402
+from plexapi.exceptions import NotFound as PlexNotFound, PlexApiException, Unauthorized  # noqa: E402
+from plexapi.myplex import MyPlexAccount  # noqa: E402
+from plexapi.playlist import Playlist  # noqa: E402
+from plexapi.server import PlexServer  # noqa: E402
+from plexapi.utils import setDatetimeTimezone  # noqa: E402
+
+setDatetimeTimezone("UTC")  # plexapi's datetimes come back aware, in UTC, like the rest of ampanion's
+
+PRODUCT = "ampanion"
+PAGE = 1000  # container_size for library searches: one request per thousand items, not per hundred
 
 
 class GatewayError(Exception):
@@ -200,57 +218,60 @@ class Gateway(Protocol):
         ...
 
 
-def _metadata_uri(machine_id: str, rating_keys: list[str]) -> str:
-    return f"server://{machine_id}/com.plexapp.plugins.library/library/metadata/{','.join(rating_keys)}"
+def _tags(item) -> tuple[str, ...]:
+    return tuple(g.tag for g in item.genres)
 
 
-def _playlist(item: dict) -> PlexPlaylist:
-    return PlexPlaylist(id=str(item["ratingKey"]), title=item.get("title", ""), summary=item.get("summary", ""))
+def _playlist(item: Playlist) -> PlexPlaylist:
+    return PlexPlaylist(id=str(item.ratingKey), title=item.title or "", summary=item.summary or "")
 
 
-def _tags(item: dict) -> tuple[str, ...]:
-    return tuple(g["tag"] for g in item.get("Genre", []))
+@contextmanager
+def _errors(where: str, not_found: type[GatewayError] = NotFound):
+    """Translate python-plexapi's and requests' failures into the Gateway's typed errors."""
+    try:
+        yield
+    except Unauthorized as e:  # before BadRequest, its base class
+        raise TokenExpired(f"{where} rejected the token") from e
+    except PlexNotFound as e:
+        raise not_found(f"{where}: {e}") from e
+    # The last three: plexapi reading an answer that isn't shaped as it expects.
+    except (PlexApiException, requests.RequestException, ElementTree.ParseError, AttributeError, TypeError, ValueError) as e:
+        raise Unreachable(f"{where}: {e}") from e
 
 
 class PlexGateway:
-    """The real Gateway, over HTTP."""
+    """The real Gateway: python-plexapi for plex.tv and the Plex server, httpx for what it doesn't cover."""
 
-    def __init__(self, client_identifier: str, http: httpx.Client | None = None):
+    def __init__(self, client_identifier: str, http: httpx.Client | None = None, session: requests.Session | None = None):
         self._client_identifier = client_identifier
         self._http = http or httpx.Client(timeout=30)
+        self._session = session or requests.Session()
+        # plexapi sends these process-wide headers on every request; there is one Gateway per process.
+        plexapi.BASE_HEADERS.update({"X-Plex-Client-Identifier": client_identifier, "X-Plex-Product": PRODUCT})
 
-    def _plex_tv_response(self, method: str, url: str, token: str | None, accept="application/json", **kwargs):
-        headers = {
-            "Accept": accept,
-            "X-Plex-Client-Identifier": self._client_identifier,
-            "X-Plex-Product": "ampanion",
-        }
-        if token:
-            headers["X-Plex-Token"] = token
+    # --- plex.tv ---
+
+    def _plex_tv(self, method: str, path: str, **kwargs) -> dict:
+        """The PIN endpoints, over httpx: plexapi's MyPlexPinLogin keeps the PIN id private to one object, and ampanion reads it back in a later request."""
+        headers = {"Accept": "application/json", "X-Plex-Client-Identifier": self._client_identifier, "X-Plex-Product": PRODUCT}
         try:
-            response = self._http.request(method, url, headers=headers, **kwargs)
+            response = self._http.request(method, f"https://plex.tv/api/v2{path}", headers=headers, **kwargs)
         except httpx.HTTPError as e:
             raise Unreachable(f"plex.tv: {e}") from e
         if response.status_code == 401:
             raise TokenExpired("plex.tv rejected the token")
         if response.is_error:
             raise Unreachable(f"plex.tv answered {response.status_code}")
-        return response
+        return response.json()
 
-    def _plex_tv(self, method: str, path: str, token: str | None = None, **kwargs):
-        return self._plex_tv_response(method, f"https://plex.tv/api/v2{path}", token, **kwargs).json()
-
-    def _plex_tv_xml(self, path: str, token: str) -> ElementTree.Element:
-        """plex.tv's older /api endpoints, which answer only in XML."""
-        response = self._plex_tv_response("GET", f"https://plex.tv/api{path}", token, accept="application/xml")
-        try:
-            return ElementTree.fromstring(response.content)
-        except ElementTree.ParseError as e:
-            raise Unreachable(f"plex.tv answered unreadable XML: {e}") from e
+    def _account(self, token: str) -> MyPlexAccount:
+        return MyPlexAccount(token=token, session=self._session)  # reads /api/v2/user
 
     def check_token(self, token: str) -> PlexAccount:
-        body = self._plex_tv("GET", "/user", token)
-        return PlexAccount(id=body["id"], username=body["username"])
+        with _errors("plex.tv", Unreachable):
+            account = self._account(token)
+        return PlexAccount(id=account.id, username=account.username)
 
     def create_pin(self) -> Pin:
         body = self._plex_tv("POST", "/pins", params={"strong": "true"})
@@ -260,158 +281,153 @@ class PlexGateway:
         return self._plex_tv("GET", f"/pins/{pin_id}").get("authToken")
 
     def resources(self, token: str) -> list[PlexResource]:
+        with _errors("plex.tv", Unreachable):
+            resources = self._account(token).resources()
         return [
             PlexResource(
-                name=r["name"],
-                client_identifier=r["clientIdentifier"],
-                provides=r["provides"],
-                owned=bool(r["owned"]),
-                connections=tuple(
-                    PlexConnection(uri=c["uri"], local=bool(c["local"]), relay=bool(c["relay"]))
-                    for c in r.get("connections", [])
-                ),
+                name=r.name,
+                client_identifier=r.clientIdentifier,
+                provides=r.provides or "",
+                owned=bool(r.owned),
+                connections=tuple(PlexConnection(uri=c.uri, local=bool(c.local), relay=bool(c.relay)) for c in r.connections),
             )
-            for r in self._plex_tv("GET", "/resources", token, params={"includeHttps": "1", "includeRelay": "1"})
+            for r in resources
         ]
 
     def server_identity(self, url: str, token: str) -> str:
-        headers = {"Accept": "application/json", "X-Plex-Token": token}
         try:
             # Short timeout: connections are probed one after another and a dead LAN address must not stall the page.
-            response = self._http.get(f"{url.rstrip('/')}/identity", headers=headers, timeout=5)
-            response.raise_for_status()
-            return response.json()["MediaContainer"]["machineIdentifier"]
-        except (httpx.HTTPError, ValueError, KeyError) as e:
-            raise Unreachable(f"Plex server at {url}: {e}") from e
+            with _errors(f"Plex server at {url}", Unreachable):
+                return PlexServer(url, token, session=self._session, timeout=5).machineIdentifier
+        except TokenExpired as e:  # a server refusing the token is not the Owner's server answering
+            raise Unreachable(str(e)) from e
 
     def users(self, token: str) -> list[PlexAccount]:
-        return [
-            PlexAccount(id=int(u.get("id")), username=u.get("title") or u.get("username"))
-            for u in self._plex_tv_xml("/users", token).iter("User")
-        ]
+        with _errors("plex.tv", Unreachable):
+            users = self._account(token).users()
+        return [PlexAccount(id=u.id, username=u.title or u.username) for u in users]
 
     def shared_tokens(self, token: str, machine_id: str) -> dict[int, str]:
-        shares = self._plex_tv_xml(f"/servers/{machine_id}/shared_servers", token).iter("SharedServer")
+        # The shared_servers read behind switchUser, once for all users: MyPlexUser.get_token makes one request per
+        # user and swallows every error, a 401 included, and switchUser also needs the server's URL.
+        with _errors("plex.tv", Unreachable):
+            shares = self._account(token).query(MyPlexAccount.FRIENDINVITE.format(machineId=machine_id))
+        shares = shares.iter("SharedServer") if shares is not None else ()
         return {int(s.get("userID")): s.get("accessToken") for s in shares if s.get("accessToken")}
 
     # --- Plex server ---
 
-    def _pms(self, method: str, url: str, path: str, token: str, params: dict | None = None) -> dict:
-        headers = {"Accept": "application/json", "X-Plex-Token": token, "X-Plex-Client-Identifier": self._client_identifier}
-        try:
-            response = self._http.request(method, f"{url.rstrip('/')}{path}", headers=headers, params=params)
-        except httpx.HTTPError as e:
-            raise Unreachable(f"Plex server: {e}") from e
-        if response.status_code == 401:
-            raise TokenExpired("The Plex server rejected the token")
-        if response.status_code == 404:
-            raise NotFound(f"Plex server has no {path}")
-        if response.is_error:
-            raise Unreachable(f"Plex server answered {response.status_code} to {path}")
-        try:
-            return response.json().get("MediaContainer", {}) if response.content else {}
-        except ValueError as e:
-            raise Unreachable(f"Plex server answered unreadable JSON: {e}") from e
+    def _server(self, url: str, token: str) -> PlexServer:
+        """A fresh connection (one GET /) per call, so new music sections and Playlists are never served from plexapi's caches."""
+        with _errors("Plex server"):
+            return PlexServer(url, token, session=self._session)
 
-    def _pages(self, url: str, path: str, token: str, params: dict) -> list[dict]:
-        """Every Metadata item of a listing, read a page at a time."""
-        items, size = [], 1000
-        while True:
-            page = {"X-Plex-Container-Start": len(items), "X-Plex-Container-Size": size}
-            body = self._pms("GET", url, path, token, params | page)
-            batch = body.get("Metadata", [])
-            items += batch
-            if len(batch) < size or len(items) >= body.get("totalSize", len(items) + 1):
-                return items
-
-    def _music_sections(self, url: str, token: str) -> list[str]:
-        sections = self._pms("GET", url, "/library/sections", token).get("Directory", [])
-        return [d["key"] for d in sections if d.get("type") == "artist"]
+    def _music_sections(self, server: PlexServer):
+        return [s for s in server.library.sections() if s.type == "artist"]
 
     def history(self, url: str, token: str, account_id: int, since: datetime | None) -> list[HistoryEntry]:
-        params = {"sort": "viewedAt:desc", "accountID": account_id}
-        if since is not None:
-            params["viewedAt>"] = int(since.timestamp())  # "viewedAt>=<epoch>": at or after. shortcut: assumes Plex decodes %3E in keys, unverified until tests/test_live_gateway.py runs against a live server
+        server = self._server(url, token)
+        with _errors("Plex server"):
+            # shortcut: assumes Plex decodes %3E in "viewedAt>" keys, unverified until tests/test_live_gateway.py runs against a live server
+            entries = server.history(mindate=since, accountID=account_id)
         return [
             HistoryEntry(
-                history_key=e["historyKey"],
-                rating_key=str(e["ratingKey"]),
-                played_at=datetime.fromtimestamp(e["viewedAt"], timezone.utc),
-                title=e.get("title", ""),
-                artist=e.get("originalTitle") or e.get("grandparentTitle", ""),
-                album_artist=e.get("grandparentTitle", ""),
-                album=e.get("parentTitle", ""),
+                history_key=e.historyKey,
+                rating_key=str(e.ratingKey),
+                played_at=e.viewedAt,
+                title=e.title or "",
+                artist=e.originalTitle or e.grandparentTitle or "",
+                album_artist=e.grandparentTitle or "",
+                album=e.parentTitle or "",
             )
-            for e in self._pages(url, "/status/sessions/history/all", token, params)
-            if e.get("type") == "track" and "ratingKey" in e
+            for e in entries
+            if isinstance(e, Track) and e.ratingKey is not None
         ]
 
     def library_tracks(self, url: str, token: str) -> list[LibraryTrack]:
         # shortcut: assumes bulk listings carry Genre tags and ratingCount, unverified until tests/test_live_gateway.py runs against a live server
-        tracks = []
-        for section in self._music_sections(url, token):
-            path = f"/library/sections/{section}/all"
-            artists = {str(a["ratingKey"]): _tags(a) for a in self._pages(url, path, token, {"type": 8})}
-            albums = {str(a["ratingKey"]): _tags(a) for a in self._pages(url, path, token, {"type": 9})}
-            for t in self._pages(url, path, token, {"type": 10}):
-                album_key, artist_key = str(t.get("parentRatingKey", "")), str(t.get("grandparentRatingKey", ""))
-                tracks.append(
-                    LibraryTrack(
-                        rating_key=str(t["ratingKey"]),
-                        guid=t.get("guid", ""),
-                        title=t.get("title", ""),
-                        artist=t.get("originalTitle") or t.get("grandparentTitle", ""),
-                        album_artist=t.get("grandparentTitle", ""),
-                        album=t.get("parentTitle", ""),
-                        album_key=album_key,
-                        artist_key=artist_key,
-                        track_genres=_tags(t),
-                        album_genres=albums.get(album_key, ()),
-                        artist_genres=artists.get(artist_key, ()),
-                        popularity=t.get("ratingCount"),
+        server, tracks = self._server(url, token), []
+        with _errors("Plex server"):
+            for section in self._music_sections(server):
+                artists = {str(a.ratingKey): _tags(a) for a in section.search(libtype="artist", container_size=PAGE)}
+                albums = {str(a.ratingKey): _tags(a) for a in section.search(libtype="album", container_size=PAGE)}
+                for t in section.search(libtype="track", container_size=PAGE):
+                    album_key, artist_key = str(t.parentRatingKey or ""), str(t.grandparentRatingKey or "")
+                    tracks.append(
+                        LibraryTrack(
+                            rating_key=str(t.ratingKey),
+                            guid=t.guid or "",
+                            title=t.title or "",
+                            artist=t.originalTitle or t.grandparentTitle or "",
+                            album_artist=t.grandparentTitle or "",
+                            album=t.parentTitle or "",
+                            album_key=album_key,
+                            artist_key=artist_key,
+                            track_genres=_tags(t),
+                            album_genres=albums.get(album_key, ()),
+                            artist_genres=artists.get(artist_key, ()),
+                            popularity=t.ratingCount,
+                        )
                     )
-                )
         return tracks
 
     def ratings(self, url: str, token: str) -> dict[str, float]:
-        ratings = {}
-        for section in self._music_sections(url, token):
-            for libtype in (8, 9, 10):
-                params = {"type": libtype, "userRating>": 0}  # sent as "userRating>>=0": rated items only
-                for item in self._pages(url, f"/library/sections/{section}/all", token, params):
-                    ratings[str(item["ratingKey"])] = float(item["userRating"])
+        server, ratings = self._server(url, token), {}
+        with _errors("Plex server"):
+            for section in self._music_sections(server):
+                for libtype in ("artist", "album", "track"):
+                    for item in section.search(libtype=libtype, filters={"userRating>>": 0}, container_size=PAGE):
+                        ratings[str(item.ratingKey)] = float(item.userRating)
         return ratings
 
+    def _fetch_playlist(self, server: PlexServer, playlist_id: str) -> Playlist:
+        return server.fetchItem(f"/playlists/{quote(playlist_id)}", cls=Playlist)
+
+    def _tracks(self, server: PlexServer, rating_keys: list[str]) -> list[Track]:
+        """Stand-ins plexapi builds Playlist uris from, without fetching each track."""
+        return [Track(server, ElementTree.Element("Track", ratingKey=k)) for k in rating_keys]
+
     def playlist(self, url: str, token: str, playlist_id: str) -> PlexPlaylist | None:
+        server = self._server(url, token)
         try:
-            items = self._pms("GET", url, f"/playlists/{quote(playlist_id)}", token).get("Metadata", [])
+            with _errors("Plex server"):
+                return _playlist(self._fetch_playlist(server, playlist_id))
         except NotFound:
             return None
-        if not items:
-            return None
-        return _playlist(items[0])
 
     def playlists(self, url: str, token: str) -> list[PlexPlaylist]:
-        return [_playlist(p) for p in self._pms("GET", url, "/playlists", token, {"playlistType": "audio"}).get("Metadata", [])]
+        server = self._server(url, token)
+        with _errors("Plex server"):
+            return [_playlist(p) for p in server.playlists(playlistType="audio")]
 
     def delete_playlist(self, url: str, token: str, playlist_id: str) -> None:
-        self._pms("DELETE", url, f"/playlists/{quote(playlist_id)}", token)
+        server = self._server(url, token)
+        with _errors("Plex server"):
+            self._fetch_playlist(server, playlist_id).delete()
 
     def create_playlist(self, url: str, token: str, machine_id: str, title: str, rating_keys: list[str]) -> str:
-        params = {"uri": _metadata_uri(machine_id, rating_keys), "type": "audio", "title": title, "smart": 0}
-        return str(self._pms("POST", url, "/playlists", token, params)["Metadata"][0]["ratingKey"])
+        # plexapi builds the uri from the server's own machineIdentifier, which is machine_id.
+        server = self._server(url, token)
+        with _errors("Plex server"):
+            return str(server.createPlaylist(title, items=self._tracks(server, rating_keys)).ratingKey)
 
     def clear_playlist(self, url: str, token: str, playlist_id: str) -> None:
-        self._pms("DELETE", url, f"/playlists/{quote(playlist_id)}/items", token)
+        server = self._server(url, token)
+        with _errors("Plex server"):
+            # plexapi has no "remove all items": a raw DELETE through its own query, for its headers and errors.
+            server.query(f"/playlists/{quote(playlist_id)}/items", method=self._session.delete)
 
     def add_to_playlist(self, url: str, token: str, machine_id: str, playlist_id: str, rating_keys: list[str]) -> None:
-        params = {"uri": _metadata_uri(machine_id, rating_keys)}
-        self._pms("PUT", url, f"/playlists/{quote(playlist_id)}/items", token, params)
+        server = self._server(url, token)
+        with _errors("Plex server"):
+            self._fetch_playlist(server, playlist_id).addItems(self._tracks(server, rating_keys))
 
     def set_playlist_summary(self, url: str, token: str, playlist_id: str, summary: str) -> None:
-        self._pms("PUT", url, f"/playlists/{quote(playlist_id)}", token, {"summary": summary})
+        server = self._server(url, token)
+        with _errors("Plex server"):
+            self._fetch_playlist(server, playlist_id).editSummary(summary)
 
-    # --- Tautulli: read commands only, as its API key is an admin key that can delete history ---
+    # --- Tautulli, over httpx (plexapi doesn't cover it): read commands only, as its API key is an admin key that can delete history ---
 
     def _tautulli(self, url: str, api_key: str, cmd: str, **params):
         try:
