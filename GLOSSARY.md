@@ -12,6 +12,10 @@ _Avoid_: Playlist type, recipe, generator, smart playlist
 The Plex playlist a Mix produces for one Listener, replaced each time it is refreshed.
 _Avoid_: Mix (for the output), queue
 
+**Refresh**:
+One pass for one Listener that brings their Listening history up to date, then rebuilds the Playlists of their Mixes that are due.
+_Avoid_: Sync, run, job
+
 **Listening history**:
 The record of a Listener's Plays, and their Skips where known, whichever source they come from.
 _Avoid_: Play history, scrobbles, stats
