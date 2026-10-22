@@ -22,7 +22,7 @@
     {% for s in mix.settings %}
     <label>{{ s.label }} <input type="number" name="{{ s.key }}" value="{{ settings[s.key] }}" min="{{ s.min }}" max="{{ s.max }}" required></label>
     {% endfor %}
-    <button type="submit">Save</button>
+    <button type="submit"{% if scheduler.running %} disabled title="Wait for the Refresh to finish"{% endif %}>Save</button>
     <p class="status-line">{% for p in playlists %}{% if p.genre %}{{ p.genre }}: {% endif %}{{ p.status }}{% if not loop.last %}; {% endif %}{% else %}Not refreshed yet{% endfor %}</p>
   </form>
   {% endfor %}

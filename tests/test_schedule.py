@@ -267,3 +267,27 @@ def test_reset_is_unavailable_while_a_refresh_runs(client, gateway, clock, pal):
 
     until(clock, 9, day=6)
     background(client)  # the scheduler carries on after a Reset
+
+
+def test_mix_settings_and_turning_off_wait_for_a_running_refresh(client, gateway, clock, pal):
+    seen = {}
+
+    def owner_clicks():  # while Pal's first Refresh is reading their history
+        page = client.get("/listeners/8").text
+        seen["save disabled"] = "disabled" in page.split(">Save</button>")[0].rsplit("<button", 1)[1]
+        seen["off"] = save_mix(client, enabled="").status_code
+        seen["save"] = save_mix(client, length="10").status_code
+        page = client.get("/listeners/8/turn-off").text
+        seen["turn off disabled"] = "disabled" in page.split("Turn off Pal</button>")[0].rsplit("<button", 1)[1]
+        seen["turn off"] = client.post("/listeners/8/turn-off", data={"csrf_token": csrf_from(page)}).status_code
+
+    gateway.while_reading_history = owner_clicks
+    background(client)
+    gateway.while_reading_history = lambda: None
+
+    assert seen == {"save disabled": True, "off": 409, "save": 409, "turn off disabled": True, "turn off": 409}
+    assert 'name="length" value="30"' in client.get("/listeners/8").text
+    assert save_mix(client, length="10").status_code == 200
+    assert 'name="length" value="10"' in client.get("/listeners/8").text
+    page = client.get("/listeners/8/turn-off").text
+    assert client.post("/listeners/8/turn-off", data={"csrf_token": csrf_from(page)}).url.path == "/"

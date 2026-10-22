@@ -19,6 +19,7 @@ from ampanion.schedule import Scheduler
 from ampanion.store import Store
 
 NO_SHARE = "No library share on this server"
+BUSY = "A Refresh is running. Try again once it has finished."
 TABS = ("mixes", "playlists", "history")
 
 
@@ -144,16 +145,21 @@ def add_listener_routes(
                 raise HTTPException(400, f"{s.label} must be between {s.min} and {s.max}")
             settings[s.key] = value
         was_enabled, enabled = mix_config(store, account_id, mix)[0], form.get("enabled") == "on"
-        if not enabled and on_plex(store, account_id, mix.key):
-            if form.get("confirm") != "yes":
-                context = {"page": "listener", "listener": listener_or_404(account_id), "mix": mix, "settings": settings}
-                return templates.TemplateResponse(request, "mix_off.html", context)
-            delete_from_plex(account_id, [mix.key])
-        if mix.key == GENRE_MIX.key:  # a lowered count deletes the surplus Playlists now, not at the next build
-            genres = {p.genre for p in store.managed_playlists(account_id, mix.key)}
-            if surplus := surplus_genres(store.plays(account_id), genres, settings["count"]):
-                delete_from_plex(account_id, [mix.key], surplus)
-        store.set_mix_settings(account_id, mix.key, enabled, settings)
+        if not enabled and on_plex(store, account_id, mix.key) and form.get("confirm") != "yes":
+            context = {"page": "listener", "listener": listener_or_404(account_id), "mix": mix, "settings": settings}
+            return templates.TemplateResponse(request, "mix_off.html", context)
+
+        def save():
+            if not enabled:
+                delete_from_plex(account_id, [mix.key])
+            elif mix.key == GENRE_MIX.key:  # a lowered count deletes the surplus Playlists now, not at the next build
+                genres = {p.genre for p in store.managed_playlists(account_id, mix.key)}
+                if surplus := surplus_genres(store.plays(account_id), genres, settings["count"]):
+                    delete_from_plex(account_id, [mix.key], surplus)
+            store.set_mix_settings(account_id, mix.key, enabled, settings)
+
+        if not scheduler.unless_running(save):
+            raise HTTPException(409, BUSY)
         if enabled and not was_enabled:
             scheduler.request([account_id])
         return RedirectResponse(f"/listeners/{account_id}", 303)
@@ -166,6 +172,11 @@ def add_listener_routes(
     @app.post("/listeners/{account_id}/turn-off")
     def turn_off(account_id: int):
         listener_or_404(account_id)
-        delete_from_plex(account_id, list(MIXES))
-        store.remove_listener(account_id)
+
+        def remove():
+            delete_from_plex(account_id, list(MIXES))
+            store.remove_listener(account_id)
+
+        if not scheduler.unless_running(remove):
+            raise HTTPException(409, BUSY)
         return RedirectResponse("/", 303)

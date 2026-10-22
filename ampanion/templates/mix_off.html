@@ -8,7 +8,8 @@
   <input type="hidden" name="confirm" value="yes">
   {% for key, value in settings.items() %}<input type="hidden" name="{{ key }}" value="{{ value }}">
   {% endfor %}
-  <button type="submit" class="danger">Turn {{ mix.title }} off</button>
+  <button type="submit" class="danger"{% if scheduler.running %} disabled{% endif %}>Turn {{ mix.title }} off</button>
+  {% if scheduler.running %}<span class="progress" role="status">Wait for the Refresh to finish: {{ scheduler.progress }}</span>{% endif %}
   <a href="/listeners/{{ listener.account_id }}">Cancel</a>
 </form>
 {% endblock %}

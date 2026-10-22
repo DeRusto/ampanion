@@ -59,6 +59,7 @@ class Scheduler:
         self._running = threading.Lock()  # one run at a time
         self._wake = threading.Event()
         self.progress: str | None = None  # what the run in progress is doing, for the Refresh buttons
+        self.running = False  # a run has started and not finished (one merely queued reads everything when it starts)
         if store.last_slot is None:  # a fresh install has missed no run
             self.mark_slot_done()
         self.check_owner_token()  # at startup
@@ -114,6 +115,14 @@ class Scheduler:
             action()
         return True
 
+    def unless_running(self, action: Callable[[], None]) -> bool:
+        """Do action unless a run is in progress (False); a queued run waits for it, then sees what it changed."""
+        with self._lock:
+            if self.running:
+                return False
+            action()
+        return True
+
     def request_now(self, account_ids: list[int] | None) -> bool:
         """Refresh now: refused (False) while a run is in progress or waiting."""
         if not self.when_idle(lambda: self._queue.append(Run(account_ids))):
@@ -132,14 +141,17 @@ class Scheduler:
             return
         try:
             while self._queue:
-                run = self._queue[0]
+                with self._lock:
+                    run, self.running = self._queue[0], True
                 self._run(run)
                 if run.slot:  # only now: a run cut short (ampanion killed) is caught up on the next start
                     self.store.set_last_slot(run.slot)
                 with self._lock:
                     self._queue.popleft()
+                    self.running = False
                     self.progress = "Refresh starting…" if self._queue else None
         finally:
+            self.running = False
             self._running.release()
 
     def _run(self, run: Run) -> None:
