@@ -2,7 +2,8 @@ from datetime import timezone, tzinfo
 from pathlib import Path
 from random import Random
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -100,5 +101,20 @@ def create_app(
     def settings(request: Request):
         context = {"page": "settings", "store": store, "mixes": MIXES.values()}
         return templates.TemplateResponse(request, "settings.html", context)
+
+    @app.get("/settings/reset")
+    def confirm_reset(request: Request):
+        return templates.TemplateResponse(request, "reset.html", {"page": "settings"})
+
+    @app.post("/settings/reset")
+    def reset(request: Request):
+        def wipe():
+            store.reset()  # Playlists on Plex stay: re-adding a Listener on the same server takes them over by marker
+            scheduler.mark_slot_done()  # like a fresh install, there's no missed run to catch up
+
+        if not scheduler.when_idle(wipe):
+            raise HTTPException(409, "A Refresh is running. Reset once it has finished.")
+        request.session.clear()
+        return RedirectResponse("/signin", 303)
 
     return app

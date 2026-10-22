@@ -7,6 +7,7 @@ pages stay fast, and tests step the queue by calling `tick()` with a fake clock 
 import logging
 import threading
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta, tzinfo
 from random import Random
@@ -76,12 +77,20 @@ class Scheduler:
             self.progress = self.progress or "Refresh starting…"
         self._wake.set()
 
-    def request_now(self, account_ids: list[int] | None) -> bool:
-        """Refresh now: refused (False) while a run is in progress or waiting."""
+    def when_idle(self, action: Callable[[], None]) -> bool:
+        """Do action unless a run is in progress or waiting (False); no run can start while it runs."""
         with self._lock:
             if self._queue:
                 return False
-        self.request(account_ids)
+            action()
+        return True
+
+    def request_now(self, account_ids: list[int] | None) -> bool:
+        """Refresh now: refused (False) while a run is in progress or waiting."""
+        if not self.when_idle(lambda: self._queue.append(Run(account_ids))):
+            return False
+        self.progress = "Refresh starting…"
+        self._wake.set()
         return True
 
     def tick(self) -> None:

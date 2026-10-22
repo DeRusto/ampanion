@@ -223,3 +223,18 @@ def test_refresh_records_older_than_90_days_are_pruned(client, gateway, clock, p
     clock.advance(days=2)
     refresh(client)
     assert "2026-01-05" not in history(client)
+
+
+def test_reset_is_unavailable_while_a_refresh_runs(client, gateway, clock, pal):
+    page = client.get("/settings/reset").text  # Pal's first Refresh hasn't finished
+    assert "disabled" in page.split("Reset ampanion</button>")[0].rsplit("<button", 1)[1]
+    assert client.post("/settings/reset", data={"csrf_token": csrf_from(page)}).status_code == 409
+
+    background(client)
+    page = client.get("/settings/reset").text
+    assert "disabled" not in page.split("Reset ampanion</button>")[0].rsplit("<button", 1)[1]
+    response = client.post("/settings/reset", data={"csrf_token": csrf_from(page)}, follow_redirects=False)
+    assert response.headers["location"] == "/signin"
+
+    until(clock, 9, day=6)
+    background(client)  # the scheduler carries on after a Reset
