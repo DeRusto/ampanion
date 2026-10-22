@@ -134,6 +134,10 @@ def refresh_listener(
             outcomes.append({"mix": "skips", "outcome": "failed", "detail": f"Couldn't read Skips from Tautulli: {e}"})
         skips = store.skips(account_id)
 
+    keys_by_guid: dict[str, list[str]] = {}  # every copy of a recording, not just the last one by_guid keeps
+    for t in library.tracks.values():
+        keys_by_guid.setdefault(t.guid or t.rating_key, []).append(t.rating_key)
+
     for mix in MIXES.values():
         enabled, settings = mix_config(store, account_id, mix)
         if not enabled or not due(account_id, mix):
@@ -141,7 +145,7 @@ def refresh_listener(
         try:
             # Picks are kept by guid, so a rescan that gives a track a new rating key doesn't lift its exclusion.
             managed = store.managed_playlists(account_id, mix.key)
-            previous = {p.genre: [library.by_guid.get(g, g) for g in p.picked] for p in managed}
+            previous = {p.genre: [k for g in p.picked for k in keys_by_guid.get(g, [g])] for p in managed}
             # Every Playlist of the Mix is computed before any is touched.
             playlists = mix.rule(MixInput(plays, skips, library, ratings, settings, previous, clock.now(), rng))
             for rank, (genre, tracks) in enumerate(playlists.items()):  # a Genre Mix rule returns them best first

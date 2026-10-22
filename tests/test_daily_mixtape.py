@@ -3,7 +3,7 @@
 import pytest
 
 from tests.test_listeners import add_listener
-from tests.test_on_repeat import PAL, play, refresh
+from tests.test_on_repeat import PAL, background, play, refresh
 from tests.test_sign_in import csrf_from
 
 
@@ -128,3 +128,20 @@ def test_length_tracks_per_artist_and_fresh_share_are_editable_on_the_mixes_tab(
     assert len(items) == 10 and [kind_of(k) for k in items].count("fresh") == 7
     assert max([artist_of(k) for k in items].count(a) for a in map(artist_of, items)) <= 3
     assert save_mixtape(client, fresh_share="101").status_code == 400
+
+
+def test_a_previous_pick_stays_excluded_when_another_copy_shares_its_guid(client, gateway, clock, pal):
+    background(client)  # Pal's first Refresh, on the empty library
+    for k in ("copy1", "copy2"):  # two copies of one recording
+        gateway.add_track(k, artist=f"Dup{k}", album=f"{k} LP", guid="plex://track/same")
+        play(gateway, clock, 8, k, times=3)
+    for i in range(5):
+        artist_with(gateway, clock, f"Old{i}", familiar=1)
+    refresh(client)
+    assert {"copy1", "copy2"} <= set(mixtape(gateway).items)  # everything eligible is picked
+
+    for i in range(6):
+        artist_with(gateway, clock, f"New{i}", familiar=1)
+    refresh(client)
+    items = set(mixtape(gateway).items)
+    assert len(items) == 6 and not items & {"copy1", "copy2"}
