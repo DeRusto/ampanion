@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS listeners (
     account_id INTEGER PRIMARY KEY,  -- plex.tv account id
     name       TEXT NOT NULL,
     added_at   TEXT NOT NULL,
-    first_fill_done INTEGER NOT NULL DEFAULT 0  -- their whole Plex history has been read once
+    plays_synced_at TEXT  -- the last successful Play sync; none until their whole Plex history has been read once
 );
 CREATE TABLE IF NOT EXISTS plays (
     account_id   INTEGER NOT NULL,
@@ -318,7 +318,7 @@ class Store:
 
     def add_listener(self, account_id: int, name: str, added_at: datetime) -> None:
         with self.connect() as db:
-            db.execute("INSERT OR IGNORE INTO listeners VALUES (?, ?, ?, 0)", (account_id, name, added_at.isoformat()))
+            db.execute("INSERT OR IGNORE INTO listeners VALUES (?, ?, ?, NULL)", (account_id, name, added_at.isoformat()))
 
     def remove_listener(self, account_id: int) -> None:
         """Forget everything stored for the Listener. Later tables (Plays, Skips, Mix settings...) are deleted here too."""
@@ -328,15 +328,16 @@ class Store:
 
     # --- Listening history ---
 
-    def first_fill_done(self, account_id: int) -> bool:
+    def plays_synced(self, account_id: int) -> datetime | None:
+        """When the Listener's Plays were last synced; None before their first fill."""
         with self.connect() as db:
-            row = db.execute("SELECT first_fill_done FROM listeners WHERE account_id = ?", (account_id,)).fetchone()
-        return bool(row and row[0])
+            row = db.execute("SELECT plays_synced_at FROM listeners WHERE account_id = ?", (account_id,)).fetchone()
+        return datetime.fromisoformat(row[0]) if row and row[0] else None
 
-    def add_plays(self, account_id: int, plays: list[tuple[str, Play]]) -> None:
-        """Insert (historyKey, Play) pairs, leaving ones already stored; the Listener's first fill is then done."""
+    def add_plays(self, account_id: int, plays: list[tuple[str, Play]], synced_at: datetime) -> None:
+        """Insert (historyKey, Play) pairs, leaving ones already stored, and note when this sync ran."""
         with self.connect() as db:
-            db.execute("UPDATE listeners SET first_fill_done = 1 WHERE account_id = ?", (account_id,))
+            db.execute("UPDATE listeners SET plays_synced_at = ? WHERE account_id = ?", (synced_at.isoformat(), account_id))
             db.executemany(
                 "INSERT OR IGNORE INTO plays VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [

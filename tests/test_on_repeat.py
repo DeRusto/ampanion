@@ -320,3 +320,15 @@ def test_turning_a_listener_off_forgets_their_history(client, gateway, clock, pa
 
     assert "Not enough history yet" in client.get("/listeners/8").text
     assert "On Repeat: 5 tracks" not in client.get("/").text
+
+
+def test_after_a_long_outage_the_sync_reads_back_to_the_last_successful_one(client, gateway, clock, pal):
+    save_mix(client, window_days="400")
+    refresh(client)  # the first fill finds nothing
+    for n in range(1, 6):
+        play(gateway, clock, 8, f"t{n}", times=2, days_ago=-10)  # ten days after that sync
+    clock.advance(days=200)  # ampanion was stopped for 200 days
+
+    refresh(client)
+
+    assert len(on_repeat(gateway).items) == 5
