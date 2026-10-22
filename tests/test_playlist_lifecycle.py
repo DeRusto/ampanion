@@ -21,7 +21,7 @@ def test_a_listeners_rename_survives_and_the_marker_is_put_back(client, gateway,
 
     refresh(client)
 
-    [again] = gateway.playlists_of(PAL)
+    again = next(p for p in gateway.playlists_of(PAL) if p.id == playlist.id)
     assert (again.id, again.title, again.summary) == (playlist.id, "My jams", MARKER)
 
 
@@ -47,15 +47,16 @@ def leftover(gateway, title, summary):
 
 
 def test_with_no_stored_id_a_playlist_whose_marker_names_the_mix_is_taken_over(client, gateway, clock, pal):
-    other = leftover(gateway, "Deep Cuts", MARKER.replace("On Repeat", "Deep Cuts"))
+    other = leftover(gateway, "Mine", MARKER.replace("On Repeat", "Someone else's Mix"))
     mine = leftover(gateway, "Renamed", MARKER)
     five_plays(gateway, clock)
 
     refresh(client)
 
-    assert [p.id for p in gateway.playlists_of(PAL)] == [other, mine]
-    assert gateway.playlists_of(PAL)[1].items == ["t1", "t2", "t3", "t4", "t5"]
-    assert gateway.playlists_of(PAL)[1].title == "Renamed"
+    assert on_repeat(gateway) is None  # no new one was made
+    playlists = {p.id: p for p in gateway.playlists_of(PAL)}
+    assert (playlists[mine].title, playlists[mine].items) == ("Renamed", ["t1", "t2", "t3", "t4", "t5"])
+    assert playlists[other].items == ["t40"]
     assert "recreated" not in client.get("/listeners/8?tab=history").text
 
 
@@ -65,7 +66,7 @@ def test_a_playlist_whose_marker_was_changed_is_not_taken_over(client, gateway, 
 
     refresh(client)
 
-    [kept, new] = gateway.playlists_of(PAL)
+    kept, new = [p for p in gateway.playlists_of(PAL) if p.title == "On Repeat"]
     assert (kept.id, kept.items) == (edited, ["t40"])
     assert new.items == ["t1", "t2", "t3", "t4", "t5"]
 
@@ -108,14 +109,15 @@ def test_the_playlists_tab_lists_what_ampanion_has_on_plex(client, gateway, cloc
     assert "hasn't made any Playlists" in client.get("/listeners/8?tab=playlists").text
     five_plays(gateway, clock)
     refresh(client)
-    gateway.rename_playlist(PAL, on_repeat(gateway).id, "My jams")
+    jams = on_repeat(gateway).id
+    gateway.rename_playlist(PAL, jams, "My jams")
     leftover(gateway, "Road trip", "not ampanion's")
 
     html = client.get("/listeners/8?tab=playlists").text
 
     assert "<td>My jams</td><td>5</td><td>2026-01-05 12:00</td>" in html
     assert "Road trip" not in html
-    gateway.delete_playlist(URL, PAL, gateway.playlists_of(PAL)[0].id)  # gone from Plex: no longer listed
+    gateway.delete_playlist(URL, PAL, jams)  # gone from Plex: no longer listed
     assert "My jams" not in client.get("/listeners/8?tab=playlists").text
 
 
