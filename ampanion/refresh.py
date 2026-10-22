@@ -136,7 +136,7 @@ def refresh_listener(
         if not enabled or not due(account_id, mix):
             continue
         try:
-            previous = {p.genre: p.tracks for p in store.managed_playlists(account_id, mix.key)}
+            previous = {p.genre: p.picked for p in store.managed_playlists(account_id, mix.key)}
             # Every Playlist of the Mix is computed before any is touched.
             playlists = mix.rule(MixInput(plays, skips, library, ratings, settings, previous, clock.now(), rng))
             for genre, tracks in playlists.items():

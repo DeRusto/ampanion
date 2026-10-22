@@ -42,7 +42,8 @@ def publish(
     status = status_line(len(tracks), length)
     managed = next((p for p in store.managed_playlists(account_id, mix.key) if p.genre == genre), None)
     if len(tracks) < MIN_TRACKS:
-        kept = replace(managed, status=status) if managed else ManagedPlaylist(mix.key, genre, None, [], status, now)
+        # The Playlist stays, but the next Refresh excludes only this pick: an exclusion lasts one Refresh.
+        kept = replace(managed, status=status, picked=tracks) if managed else ManagedPlaylist(mix.key, genre, None, [], status, now, tracks)
         store.save_managed_playlist(account_id, kept)
         return status
     title = playlist_title(mix, genre)
@@ -65,7 +66,7 @@ def publish(
     for i in range(0, len(rest), CHUNK):
         gateway.add_to_playlist(url, token, machine_id, playlist_id, rest[i : i + CHUNK])
     gateway.set_playlist_summary(url, token, playlist_id, marker)
-    store.save_managed_playlist(account_id, ManagedPlaylist(mix.key, genre, playlist_id, tracks, status, now))
+    store.save_managed_playlist(account_id, ManagedPlaylist(mix.key, genre, playlist_id, tracks, status, now, tracks))
     return status
 
 

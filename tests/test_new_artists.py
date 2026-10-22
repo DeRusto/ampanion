@@ -115,6 +115,20 @@ def test_last_times_artists_are_skipped_on_the_next_refresh_only(client, gateway
     assert len(third) == 10 and not second & third and third <= first
 
 
+def test_a_refresh_held_back_by_the_five_track_minimum_still_lifts_the_exclusion_after_it(client, gateway, clock, pal):
+    for i in range(11):
+        artist_with(gateway, clock, f"New{i}", tracks=3)
+
+    refresh(client)
+    first = new_artists(gateway).items
+    refresh(client)  # only one artist left over: 3 tracks, so the Playlist is left as it was
+    assert new_artists(gateway).items == first
+    artist_with(gateway, clock, "Newcomer", tracks=3)
+    refresh(client)  # excludes only the one artist picked last time, not the first Refresh's ten
+
+    assert len({artist_of(k) for k in new_artists(gateway).items}) == 10
+
+
 def test_low_rated_artists_are_dropped_and_low_rated_tracks_left_out(client, gateway, clock, pal):
     artist_with(gateway, clock, "Panned", tracks=4)
     good = artist_with(gateway, clock, "Good", tracks=7)

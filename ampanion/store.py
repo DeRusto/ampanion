@@ -6,7 +6,7 @@ import sqlite3
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, time
 from pathlib import Path
 
@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS managed_playlists (
     tracks       TEXT NOT NULL DEFAULT '[]', -- JSON list of the rating keys last published
     status       TEXT NOT NULL,
     refreshed_at TEXT NOT NULL,
+    picked       TEXT NOT NULL DEFAULT '[]', -- JSON list of the rating keys last picked, published or held back
     PRIMARY KEY (account_id, mix, genre)
 );
 CREATE TABLE IF NOT EXISTS mix_builds (
@@ -124,6 +125,7 @@ class ManagedPlaylist:
     tracks: list[str]
     status: str
     refreshed_at: datetime
+    picked: list[str] = field(default_factory=list)  # the last Refresh's pick, even one held back: "previous" for rules
 
 
 @dataclass(frozen=True)
@@ -401,18 +403,24 @@ class Store:
     def managed_playlists(self, account_id: int, mix: str) -> list[ManagedPlaylist]:
         with self.connect() as db:
             rows = db.execute(
-                "SELECT mix, genre, playlist_id, tracks, status, refreshed_at FROM managed_playlists"
+                "SELECT mix, genre, playlist_id, tracks, status, refreshed_at, picked FROM managed_playlists"
                 " WHERE account_id = ? AND mix = ? ORDER BY genre",
                 (account_id, mix),
             ).fetchall()
-        return [ManagedPlaylist(r[0], r[1] or None, r[2], json.loads(r[3]), r[4], datetime.fromisoformat(r[5])) for r in rows]
+        return [
+            ManagedPlaylist(r[0], r[1] or None, r[2], json.loads(r[3]), r[4], datetime.fromisoformat(r[5]), json.loads(r[6]))
+            for r in rows
+        ]
 
     def save_managed_playlist(self, account_id: int, playlist: ManagedPlaylist) -> None:
         p = playlist
         with self.connect() as db:
             db.execute(
-                "INSERT OR REPLACE INTO managed_playlists VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (account_id, p.mix, p.genre or "", p.playlist_id, json.dumps(p.tracks), p.status, p.refreshed_at.isoformat()),
+                "INSERT OR REPLACE INTO managed_playlists VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    account_id, p.mix, p.genre or "", p.playlist_id, json.dumps(p.tracks), p.status,
+                    p.refreshed_at.isoformat(), json.dumps(p.picked),
+                ),
             )
 
     def forget_managed_playlist(self, account_id: int, mix: str, genre: str | None) -> None:

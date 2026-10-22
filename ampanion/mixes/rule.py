@@ -21,7 +21,7 @@ class MixInput:
     library: LibraryIndex
     ratings: Ratings
     settings: dict[str, int]  # this Listener's values of the Mix's settings, keyed by Setting.key
-    previous: dict[str | None, list[str]]  # last published rating keys per Playlist (keyed like the result)
+    previous: dict[str | None, list[str]]  # the last Refresh's rating keys per Playlist, published or held back
     now: datetime
     rng: Random
 
