@@ -48,6 +48,7 @@ def next_slot(now: datetime, run_time: time, tz: tzinfo) -> datetime:
 class Run:
     account_ids: list[int] | None  # None: every Listener, as they are when the run starts
     nightly: bool = False  # only a nightly run skips Mixes that aren't due
+    slot: datetime | None = None  # the nightly slot this run is for, recorded as done once it has finished
 
 
 class Scheduler:
@@ -125,14 +126,16 @@ class Scheduler:
         """Queue the nightly run if its slot has come (once, however many were missed), then work through the queue."""
         slot = last_slot(self.clock.now(), self.store.run_time, self.tz)
         with self._lock:
-            if self.store.last_slot < slot:
-                self.store.set_last_slot(slot)
-                self._queue.append(Run(None, nightly=True))
+            if self.store.last_slot < slot and all(r.slot != slot for r in self._queue):
+                self._queue.append(Run(None, nightly=True, slot=slot))
         if not self._running.acquire(blocking=False):
             return
         try:
             while self._queue:
-                self._run(self._queue[0])
+                run = self._queue[0]
+                self._run(run)
+                if run.slot:  # only now: a run cut short (ampanion killed) is caught up on the next start
+                    self.store.set_last_slot(run.slot)
                 with self._lock:
                     self._queue.popleft()
                     self.progress = "Refresh starting…" if self._queue else None

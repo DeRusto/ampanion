@@ -164,6 +164,25 @@ def test_a_missed_run_is_caught_up_once_on_startup(start_app, gateway, clock, si
         assert runs(client, 42) == 2
 
 
+def test_a_nightly_run_killed_midway_is_caught_up_on_startup(start_app, gateway, clock, sign_in):
+    gateway.add_account("dee", token="owner-token", account_id=42)
+    gateway.add_server(owner_token="owner-token")
+    with start_app() as client:
+        sign_in(client, "owner-token")
+        add_listener(client, 42)
+        background(client)
+        until(clock, 9, day=6)  # the 04:00 run starts, and ampanion dies during it
+        gateway.killed_reading_history = True
+        with pytest.raises(SystemExit):
+            background(client)
+
+    gateway.killed_reading_history = False
+    with start_app() as client:
+        background(client)
+        sign_in(client, "owner-token")
+        assert "<tr class=\"ok\"" in history(client, 42).split("</tr>")[1]  # the newest row: the caught-up run
+
+
 def test_a_fresh_install_has_nothing_to_catch_up(client, gateway, clock, pal):
     background(client)
 

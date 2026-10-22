@@ -52,6 +52,7 @@ class FakeGateway:
         self._playlists: dict[str, list[FakePlaylist]] = defaultdict(list)  # token -> its account's Playlists
         self.item_batches: dict[str, list[int]] = defaultdict(list)  # token -> size of each create/add call
         self.history_down = False
+        self.killed_reading_history = False  # ampanion's process dies (e.g. the container stops) mid-Refresh
         self.rejected_tokens: set[str] = set()  # tokens the Plex server answers 401 to, e.g. a revoked share token
         # Tautulli: where it answers, its API key and the Plex server it watches; its track history by plex.tv user id.
         self._tautulli: dict[str, tuple[str, str]] = {}
@@ -243,6 +244,8 @@ class FakeGateway:
         self._server_token(token)
         if self.history_down:
             raise Unreachable("Plex server answered 500")
+        if self.killed_reading_history:
+            raise SystemExit("ampanion was killed")
         entries = [e for a, e in self._history if a == account_id and (since is None or e.played_at >= since)]
         return sorted(entries, key=lambda e: e.played_at, reverse=True)
 
