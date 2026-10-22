@@ -1,0 +1,14 @@
+{% extends "layout.html" %}
+{% block title %}Turn {{ mix.title }} off{% endblock %}
+{% block main %}
+<h1>Turn {{ mix.title }} off?</h1>
+<p>{{ listener.name }}'s {{ mix.title }} Playlists will be deleted from Plex.</p>
+<form method="post" action="/listeners/{{ listener.account_id }}/mixes/{{ mix.key }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="confirm" value="yes">
+  {% for key, value in settings.items() %}<input type="hidden" name="{{ key }}" value="{{ value }}">
+  {% endfor %}
+  <button type="submit" class="danger">Turn {{ mix.title }} off</button>
+  <a href="/listeners/{{ listener.account_id }}">Cancel</a>
+</form>
+{% endblock %}
