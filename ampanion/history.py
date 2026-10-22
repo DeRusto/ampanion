@@ -1,7 +1,7 @@
 """History sync: bring a Listener's cached Listening history up to date, Plays from Plex and Skips from Tautulli.
 
 The first fill reads their whole Plex history; later syncs re-read a trailing window and insert only unseen entries.
-Plays deleted in Plex stay. Each Play keeps a track snapshot, and is re-linked by guid when its rating key changes.
+Plays deleted in Plex stay. Each Play and Skip keeps a track snapshot, and is re-linked by guid when its rating key changes.
 """
 
 from datetime import datetime, timedelta
@@ -36,9 +36,10 @@ def sync(
             for e in entries
         ],
     )
-    stale = {p.guid for p in store.plays(account_id) if p.rating_key not in library.tracks and p.guid in library.by_guid}
+    kept = [*store.plays(account_id), *store.skips(account_id)]
+    stale = {e.guid for e in kept if e.rating_key not in library.tracks and e.guid in library.by_guid}
     for guid in stale:
-        store.relink_plays(account_id, guid, library.by_guid[guid])
+        store.relink(account_id, guid, library.by_guid[guid])
 
 
 def sync_skips(
@@ -51,7 +52,6 @@ def sync_skips(
     """
     synced = store.skips_synced(account_id)
     rows = gateway.tautulli_history(url, api_key, account_id, synced and (synced - timedelta(days=1)).date())
-    # shortcut: Skips aren't re-linked by guid when a rating key changes, as Plays are; add it if rescans lose Skips
     skips = [
         (r.row_id, Skip(r.started_at, r.rating_key, getattr(library.tracks.get(r.rating_key), "guid", None),
                         r.title, r.artist, r.album_artist, r.album, r.percent_complete))

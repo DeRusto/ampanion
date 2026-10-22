@@ -348,9 +348,11 @@ class Store:
             ).fetchall()
         return [Play(datetime.fromisoformat(r[0]), *r[1:7], tuple(json.loads(r[7]))) for r in rows]
 
-    def relink_plays(self, account_id: int, guid: str, rating_key: str) -> None:
+    def relink(self, account_id: int, guid: str, rating_key: str) -> None:
+        """Point the Listener's Plays and Skips of the track with this guid at its new rating key."""
         with self.connect() as db:
-            db.execute("UPDATE plays SET rating_key = ? WHERE account_id = ? AND guid = ?", (rating_key, account_id, guid))
+            for table in ("plays", "skips"):
+                db.execute(f"UPDATE {table} SET rating_key = ? WHERE account_id = ? AND guid = ?", (rating_key, account_id, guid))
 
     def add_skips(self, account_id: int, skips: list[tuple[int, Skip]], synced_at: datetime) -> None:
         """Insert (Tautulli row id, Skip) pairs, leaving ones already stored, and note when this sync ran."""

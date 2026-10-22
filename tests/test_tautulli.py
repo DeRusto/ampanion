@@ -184,6 +184,18 @@ def test_a_reinstalled_tautulli_reusing_row_ids_still_adds_its_skips(client, gat
     assert keys[1] not in playlist(gateway, "Deep Cuts").items
 
 
+def test_skips_of_a_track_whose_rating_key_changed_are_relinked_by_guid(client, gateway, clock, pal):
+    keys = deep_cuts_world(client, gateway, clock)
+    skip(gateway, clock, keys[1], times=2)
+    connect(client)
+    refresh(client)
+
+    gateway.rekey_track(keys[1], "rescanned")  # same guid, new rating key
+    refresh(client)
+
+    assert "rescanned" not in playlist(gateway, "Deep Cuts").items
+
+
 def test_the_owner_maps_by_their_plex_tv_id(client, gateway, clock, pal):
     add_listener(client, 42)
     keys = deep_cuts_world(client, gateway, clock, account_id=42, history_account_id=1)  # the Owner is 1 in Plex
