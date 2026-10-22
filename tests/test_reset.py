@@ -1,13 +1,13 @@
 """Reset ampanion: Settings wipes everything ampanion stored and returns it to first run, leaving Plex alone."""
 
 from tests.test_listeners import add_listener
-from tests.test_on_repeat import PAL, background, listen, on_repeat, pal, refresh  # noqa: F401 (pal is a fixture)
+from tests.test_on_repeat import PAL, background, play, on_repeat, pal, refresh  # noqa: F401 (pal is a fixture)
 from tests.test_sign_in import csrf_from
 
 
 def published(client, gateway, clock):
     for n in range(1, 6):
-        listen(gateway, clock, 8, f"t{n}", times=2, days_ago=n)
+        play(gateway, clock, 8, f"t{n}", times=2, days_ago=n)
     refresh(client)
     return {p.id: p.title for p in gateway.playlists_of(PAL)}  # On Repeat, and Deep Cuts
 

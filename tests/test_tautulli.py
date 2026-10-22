@@ -5,7 +5,7 @@ from datetime import timedelta
 import pytest
 
 from tests.test_listeners import add_listener
-from tests.test_on_repeat import PAL, background, listen, on_repeat, refresh
+from tests.test_on_repeat import PAL, background, play, on_repeat, refresh
 from tests.test_reset import reset
 from tests.test_sign_in import csrf_from
 
@@ -54,7 +54,7 @@ def playlist(gateway, title, token=PAL):
 def deep_cuts_world(client, gateway, clock, account_id=8, history_account_id=8):
     """One Top Artist with seven unplayed tracks; Deep Cuts takes them all."""
     keys = tracks(gateway, "Band", 8)
-    listen(gateway, clock, history_account_id, keys[0], times=10)
+    play(gateway, clock, history_account_id, keys[0], times=10)
     csrf = csrf_from(client.get(f"/listeners/{account_id}").text)
     data = {"csrf_token": csrf, "enabled": "on", "length": "30", "tracks_per_artist": "10"}
     client.post(f"/listeners/{account_id}/mixes/deep_cuts", data=data)
@@ -177,7 +177,7 @@ def test_a_reinstalled_tautulli_reusing_row_ids_still_adds_its_skips(client, gat
     connect(client)
     refresh(client)
     gateway.reset_tautulli()
-    skip(gateway, clock, keys[1], times=1)  # row id 1 again, but another listen
+    skip(gateway, clock, keys[1], times=1)  # row id 1 again, but another play
 
     refresh(client)
 
@@ -204,7 +204,7 @@ def test_an_unreachable_tautulli_fails_the_refresh_but_mixes_use_the_skips_alrea
     connect(client)
     refresh(client)
     gateway.stop_tautulli(TAUTULLI)
-    listen(gateway, clock, 8, keys[7], times=2)  # now played twice: no longer a deep cut
+    play(gateway, clock, 8, keys[7], times=2)  # now played twice: no longer a deep cut
 
     refresh(client)
 
@@ -232,7 +232,7 @@ def test_turning_a_listener_off_forgets_their_skips(client, gateway, clock, pal)
 def test_often_skipped_tracks_drop_out_of_genre_mix_and_daily_mixtape_but_not_on_repeat(client, gateway, clock, pal):
     keys = tracks(gateway, "Band", 25)
     for k in keys[:10]:
-        listen(gateway, clock, 8, k, times=2)  # familiar for Daily Mixtape, 20 Rock Plays, all On Repeat
+        play(gateway, clock, 8, k, times=2)  # familiar for Daily Mixtape, 20 Rock Plays, all On Repeat
     skip(gateway, clock, keys[0], times=2)  # familiar
     skip(gateway, clock, keys[20], times=2)  # fresh
     csrf = csrf_from(client.get("/listeners/8").text)

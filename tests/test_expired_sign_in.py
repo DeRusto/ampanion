@@ -1,14 +1,14 @@
 """Expired Plex sign-in: a dead Owner token pauses every Refresh until the Owner signs in again."""
 
-from tests.test_on_repeat import PAL, background, listen, on_repeat, pal, refresh  # noqa: F401
+from tests.test_on_repeat import PAL, background, play, on_repeat, pal, refresh  # noqa: F401
 from tests.test_schedule import refresh_all, until
 
 EXPIRED = "Plex sign-in expired"
 
 
-def listen_to_five(gateway, clock):
+def play_five(gateway, clock):
     for n in range(1, 6):
-        listen(gateway, clock, 8, f"t{n}", times=2, days_ago=n)
+        play(gateway, clock, 8, f"t{n}", times=2, days_ago=n)
 
 
 def expire_before_the_nightly_run(client, gateway, clock):
@@ -37,10 +37,10 @@ def test_a_dead_token_at_startup_pauses_refreshes_with_a_banner(start_app, clien
 
 
 def test_a_dead_token_before_the_nightly_run_touches_no_playlist(client, gateway, clock, pal):
-    listen_to_five(gateway, clock)
+    play_five(gateway, clock)
     refresh(client)
     before = list(on_repeat(gateway).items)
-    listen(gateway, clock, 8, "t9", times=9)
+    play(gateway, clock, 8, "t9", times=9)
     gateway.expire_token("owner-token")
 
     until(clock, 9, day=6)
@@ -73,7 +73,7 @@ def test_a_401_during_a_refresh_writes_one_record_not_one_per_listener(client, g
 
 
 def test_a_401_on_a_listeners_own_token_is_not_an_expired_sign_in(client, gateway, clock, pal):
-    listen_to_five(gateway, clock)
+    play_five(gateway, clock)
     background(client)
     gateway.rejected_tokens.add(PAL)  # Pal's server token stops working; the Owner's is fine
 
@@ -84,7 +84,7 @@ def test_a_401_on_a_listeners_own_token_is_not_an_expired_sign_in(client, gatewa
 
 def test_signing_in_again_as_the_owner_resumes_with_one_catch_up_run(client, gateway, clock, pal, sign_in):
     background(client)
-    listen_to_five(gateway, clock)
+    play_five(gateway, clock)
     gateway.expire_token("owner-token")
     until(clock, 9, day=6)
     background(client)

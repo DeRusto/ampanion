@@ -3,7 +3,7 @@
 import pytest
 
 from tests.test_listeners import add_listener
-from tests.test_on_repeat import PAL, listen, refresh
+from tests.test_on_repeat import PAL, play, refresh
 from tests.test_sign_in import csrf_from
 
 
@@ -25,7 +25,7 @@ def artist_with(gateway, clock, artist, familiar=0, fresh=0, once=0, days_ago=1)
         keys[kind] = [f"{artist}-{kind}{n}" for n in range(count)]
         for k in keys[kind]:
             gateway.add_track(k, artist=artist, album=f"{artist} LP")
-            listen(gateway, clock, 8, k, times=plays, days_ago=days_ago)
+            play(gateway, clock, 8, k, times=plays, days_ago=days_ago)
     return keys
 
 

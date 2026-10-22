@@ -3,7 +3,7 @@
 import pytest
 
 from tests.test_listeners import add_listener
-from tests.test_on_repeat import PAL, listen, refresh
+from tests.test_on_repeat import PAL, play, refresh
 from tests.test_sign_in import csrf_from
 
 URL = "http://unused"
@@ -28,7 +28,7 @@ def genre(gateway, clock, name, artists=10, tracks=6, plays=0, days_ago=1, **lev
         for n in range(tracks):
             keys.append(f"{name}-{a}-{n}")
             gateway.add_track(keys[-1], artist=f"{name} band {a}", album=f"{name} LP {a}", **tags)
-    listen(gateway, clock, 8, keys[0], times=plays, days_ago=days_ago)
+    play(gateway, clock, 8, keys[0], times=plays, days_ago=days_ago)
     return keys
 
 

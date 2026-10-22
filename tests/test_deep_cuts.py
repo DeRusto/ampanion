@@ -6,7 +6,7 @@ import pytest
 
 from ampanion.mixes.artists import spread_shuffle
 from tests.test_listeners import add_listener
-from tests.test_on_repeat import PAL, listen, refresh
+from tests.test_on_repeat import PAL, play, refresh
 from tests.test_sign_in import csrf_from
 
 
@@ -26,7 +26,7 @@ def artist_with(gateway, clock, artist, tracks, plays):
     keys = [f"{artist}-{n}" for n in range(tracks)]
     for k in keys:
         gateway.add_track(k, artist=artist, album=f"{artist} LP")
-    listen(gateway, clock, 8, keys[0], times=plays)
+    play(gateway, clock, 8, keys[0], times=plays)
     return keys
 
 
@@ -47,8 +47,8 @@ def save_deep_cuts(client, **fields):
 def test_deep_cuts_are_rarely_played_tracks_by_top_artists_capped_per_artist_and_spread(client, gateway, clock, pal):
     for i in range(12):
         artist_with(gateway, clock, f"Band{i}", tracks=6, plays=20 - i)
-    listen(gateway, clock, 8, "Band0-1", times=1)  # once still counts as a deep cut
-    listen(gateway, clock, 8, "Band0-2", times=2)  # twice doesn't
+    play(gateway, clock, 8, "Band0-1", times=1)  # once still counts as a deep cut
+    play(gateway, clock, 8, "Band0-2", times=2)  # twice doesn't
 
     for _ in range(5):
         refresh(client)

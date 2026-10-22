@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from tests.test_listeners import add_listener, sidebar
-from tests.test_on_repeat import PAL, background, listen, on_repeat, pal, refresh, save_mix  # noqa: F401
+from tests.test_on_repeat import PAL, background, play, on_repeat, pal, refresh, save_mix  # noqa: F401
 from tests.test_sign_in import csrf_from
 
 
@@ -44,7 +44,7 @@ def test_the_nightly_run_fires_at_the_run_time_in_tz(client, gateway, clock, pal
     background(client)  # Pal's first Refresh, from being added
     assert "Next nightly Refresh: Tue 06 Jan 04:00" in client.get("/").text
     for n in range(1, 6):
-        listen(gateway, clock, 8, f"t{n}", times=2, days_ago=n)
+        play(gateway, clock, 8, f"t{n}", times=2, days_ago=n)
 
     until(clock, 8, day=6)  # 03:00 in New York
     background(client)
@@ -71,10 +71,10 @@ def test_the_nightly_run_refreshes_every_listener_once(client, gateway, clock, p
 def test_a_weekly_mix_is_rebuilt_only_after_the_monday_slot(client, gateway, clock, pal):
     set_schedule(client, on_repeat="weekly")
     for n in range(1, 6):
-        listen(gateway, clock, 8, f"t{n}", times=2, days_ago=n)
+        play(gateway, clock, 8, f"t{n}", times=2, days_ago=n)
     background(client)  # built on Monday after the slot
     assert on_repeat(gateway).items == ["t1", "t2", "t3", "t4", "t5"]
-    listen(gateway, clock, 8, "t9", times=9)
+    play(gateway, clock, 8, "t9", times=9)
 
     until(clock, 9, day=6)  # Tuesday's run: not due
     background(client)
@@ -89,15 +89,15 @@ def test_a_weekly_mix_is_rebuilt_only_after_the_monday_slot(client, gateway, clo
 def test_refresh_now_rebuilds_weekly_mixes_without_moving_the_weekly_schedule(client, gateway, clock, pal):
     set_schedule(client, on_repeat="weekly")
     for n in range(1, 6):
-        listen(gateway, clock, 8, f"t{n}", times=2, days_ago=n)
+        play(gateway, clock, 8, f"t{n}", times=2, days_ago=n)
     background(client)
-    listen(gateway, clock, 8, "t9", times=9)
+    play(gateway, clock, 8, "t9", times=9)
 
     until(clock, 15, day=7)  # Wednesday
     refresh(client)
     assert on_repeat(gateway).items[0] == "t9"
 
-    listen(gateway, clock, 8, "t10", times=20)
+    play(gateway, clock, 8, "t10", times=20)
     until(clock, 9, day=12)  # still rebuilt on Monday
     background(client)
     assert on_repeat(gateway).items[0] == "t10"
@@ -135,7 +135,7 @@ def test_run_time_and_cadence_are_edited_in_settings_and_shown_on_the_mixes_tab(
     assert "Next nightly Refresh: Mon 05 Jan 23:30" in client.get("/").text
 
     for n in range(1, 6):
-        listen(gateway, clock, 8, f"t{n}", times=2, days_ago=n)
+        play(gateway, clock, 8, f"t{n}", times=2, days_ago=n)
     background(client)
     assert on_repeat(gateway).summary == "Made by ampanion: On Repeat. Refreshed weekly; edits are replaced."
 
@@ -172,7 +172,7 @@ def test_a_fresh_install_has_nothing_to_catch_up(client, gateway, clock, pal):
 
 def test_adding_a_listener_starts_a_background_refresh(client, gateway, clock, pal):
     for n in range(1, 6):
-        listen(gateway, clock, 8, f"t{n}", times=2, days_ago=n)
+        play(gateway, clock, 8, f"t{n}", times=2, days_ago=n)
     assert on_repeat(gateway) is None
 
     background(client)
@@ -185,7 +185,7 @@ def test_enabling_a_mix_starts_a_background_refresh(client, gateway, clock, pal)
     client.post("/listeners/8/mixes/on_repeat", data={"csrf_token": csrf, "window_days": "30", "length": "30"})
     background(client)
     for n in range(1, 6):
-        listen(gateway, clock, 8, f"t{n}", times=2, days_ago=n)
+        play(gateway, clock, 8, f"t{n}", times=2, days_ago=n)
 
     save_mix(client, length="20")  # turned back on
     background(client)
@@ -200,7 +200,7 @@ def test_one_listeners_failure_doesnt_stop_the_others_and_isnt_retried(client, g
     add_listener(client, 42)
     background(client)
     for n in range(1, 6):
-        listen(gateway, clock, 1, f"t{n}", times=2, days_ago=n)
+        play(gateway, clock, 1, f"t{n}", times=2, days_ago=n)
     gateway.unshare(8)  # Pal's share is gone, so Pal's Refresh fails
 
     until(clock, 9, day=6)

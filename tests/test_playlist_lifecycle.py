@@ -1,6 +1,6 @@
 """Playlist lifecycle: ampanion keeps managing its Playlists whatever the Listener or Owner does to them."""
 
-from tests.test_on_repeat import PAL, listen, on_repeat, pal, refresh  # noqa: F401 (pal is a fixture)
+from tests.test_on_repeat import PAL, play, on_repeat, pal, refresh  # noqa: F401 (pal is a fixture)
 from tests.test_sign_in import csrf_from
 
 URL = "http://unused"
@@ -9,7 +9,7 @@ MARKER = "Made by ampanion: On Repeat. Refreshed daily; edits are replaced."
 
 def five_plays(gateway, clock):
     for n in range(1, 6):
-        listen(gateway, clock, 8, f"t{n}", times=2, days_ago=n)
+        play(gateway, clock, 8, f"t{n}", times=2, days_ago=n)
 
 
 def test_a_listeners_rename_survives_and_the_marker_is_put_back(client, gateway, clock, pal):
