@@ -6,7 +6,9 @@ Each operation raises a GatewayError subclass the caller can tell apart.
 """
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Protocol
+from urllib.parse import quote
 from xml.etree import ElementTree
 
 import httpx
@@ -22,6 +24,10 @@ class TokenExpired(GatewayError):
 
 class Unreachable(GatewayError):
     """The service could not be reached or answered with an unexpected error."""
+
+
+class NotFound(GatewayError):
+    """The Plex server has no such item (404)."""
 
 
 @dataclass(frozen=True)
@@ -62,6 +68,49 @@ class PlexResource:
         return "server" in self.provides.split(",")
 
 
+@dataclass(frozen=True)
+class HistoryEntry:
+    """One Play as Plex's history lists it, with the track as it was named then."""
+
+    history_key: str
+    rating_key: str
+    played_at: datetime
+    title: str
+    artist: str
+    album_artist: str
+    album: str
+
+
+@dataclass(frozen=True)
+class LibraryTrack:
+    """A music track on the server, with its album and artist and their genre tags."""
+
+    rating_key: str
+    guid: str
+    title: str
+    artist: str
+    album_artist: str
+    album: str
+    album_key: str
+    artist_key: str
+    track_genres: tuple[str, ...] = ()
+    album_genres: tuple[str, ...] = ()
+    artist_genres: tuple[str, ...] = ()
+    popularity: int | None = None  # Plex's ratingCount (Last.fm scrobbles), when known
+
+    @property
+    def genres(self) -> tuple[str, ...]:
+        """The tags at the most specific level that has any: track, then album, then artist."""
+        return self.track_genres or self.album_genres or self.artist_genres
+
+
+@dataclass(frozen=True)
+class PlexPlaylist:
+    id: str
+    title: str
+    summary: str
+
+
 class Gateway(Protocol):
     def check_token(self, token: str) -> PlexAccount:
         """Return the plex.tv account the token belongs to. Raises TokenExpired on 401."""
@@ -90,6 +139,43 @@ class Gateway(Protocol):
     def shared_tokens(self, token: str, machine_id: str) -> dict[int, str]:
         """Server tokens by plex.tv account id for the users with a share on the server (python-plexapi's switchUser)."""
         ...
+
+
+    def history(self, url: str, token: str, account_id: int, since: datetime | None) -> list[HistoryEntry]:
+        """Track Plays in the server's history for a local account id (the Owner is 1), all of it or since a time."""
+        ...
+
+    def library_tracks(self, url: str, token: str) -> list[LibraryTrack]:
+        """Every track in the server's music libraries."""
+        ...
+
+    def ratings(self, url: str, token: str) -> dict[str, float]:
+        """The token's account's Ratings (0-10, 2 per star) by rating key, on tracks, albums and artists."""
+        ...
+
+    def playlist(self, url: str, token: str, playlist_id: str) -> PlexPlaylist | None:
+        """The token's account's Playlist with this id, or None if it doesn't exist (or isn't theirs)."""
+        ...
+
+    def create_playlist(self, url: str, token: str, machine_id: str, title: str, rating_keys: list[str]) -> str:
+        """Create a regular audio Playlist holding rating_keys (at least one) in the token's account; returns its id."""
+        ...
+
+    def clear_playlist(self, url: str, token: str, playlist_id: str) -> None: ...
+
+    def add_to_playlist(self, url: str, token: str, machine_id: str, playlist_id: str, rating_keys: list[str]) -> None:
+        """Append rating_keys, in order."""
+        ...
+
+    def set_playlist_summary(self, url: str, token: str, playlist_id: str, summary: str) -> None: ...
+
+
+def _metadata_uri(machine_id: str, rating_keys: list[str]) -> str:
+    return f"server://{machine_id}/com.plexapp.plugins.library/library/metadata/{','.join(rating_keys)}"
+
+
+def _tags(item: dict) -> tuple[str, ...]:
+    return tuple(g["tag"] for g in item.get("Genre", []))
 
 
 class PlexGateway:
@@ -173,3 +259,115 @@ class PlexGateway:
     def shared_tokens(self, token: str, machine_id: str) -> dict[int, str]:
         shares = self._plex_tv_xml(f"/servers/{machine_id}/shared_servers", token).iter("SharedServer")
         return {int(s.get("userID")): s.get("accessToken") for s in shares if s.get("accessToken")}
+
+    # --- Plex server ---
+
+    def _pms(self, method: str, url: str, path: str, token: str, params: dict | None = None) -> dict:
+        headers = {"Accept": "application/json", "X-Plex-Token": token, "X-Plex-Client-Identifier": self._client_identifier}
+        try:
+            response = self._http.request(method, f"{url.rstrip('/')}{path}", headers=headers, params=params)
+        except httpx.HTTPError as e:
+            raise Unreachable(f"Plex server: {e}") from e
+        if response.status_code == 401:
+            raise TokenExpired("The Plex server rejected the token")
+        if response.status_code == 404:
+            raise NotFound(f"Plex server has no {path}")
+        if response.is_error:
+            raise Unreachable(f"Plex server answered {response.status_code} to {path}")
+        try:
+            return response.json().get("MediaContainer", {}) if response.content else {}
+        except ValueError as e:
+            raise Unreachable(f"Plex server answered unreadable JSON: {e}") from e
+
+    def _pages(self, url: str, path: str, token: str, params: dict) -> list[dict]:
+        """Every Metadata item of a listing, read a page at a time."""
+        items, size = [], 1000
+        while True:
+            page = {"X-Plex-Container-Start": len(items), "X-Plex-Container-Size": size}
+            body = self._pms("GET", url, path, token, params | page)
+            batch = body.get("Metadata", [])
+            items += batch
+            if len(batch) < size or len(items) >= body.get("totalSize", len(items) + 1):
+                return items
+
+    def _music_sections(self, url: str, token: str) -> list[str]:
+        sections = self._pms("GET", url, "/library/sections", token).get("Directory", [])
+        return [d["key"] for d in sections if d.get("type") == "artist"]
+
+    def history(self, url: str, token: str, account_id: int, since: datetime | None) -> list[HistoryEntry]:
+        params = {"sort": "viewedAt:desc", "accountID": account_id}
+        if since is not None:
+            params["viewedAt>"] = int(since.timestamp())  # "viewedAt>=<epoch>": at or after. shortcut: assumes Plex decodes %3E in keys, check in the live contract suite
+        return [
+            HistoryEntry(
+                history_key=e["historyKey"],
+                rating_key=str(e["ratingKey"]),
+                played_at=datetime.fromtimestamp(e["viewedAt"], timezone.utc),
+                title=e.get("title", ""),
+                artist=e.get("originalTitle") or e.get("grandparentTitle", ""),
+                album_artist=e.get("grandparentTitle", ""),
+                album=e.get("parentTitle", ""),
+            )
+            for e in self._pages(url, "/status/sessions/history/all", token, params)
+            if e.get("type") == "track" and "ratingKey" in e
+        ]
+
+    def library_tracks(self, url: str, token: str) -> list[LibraryTrack]:
+        # shortcut: whether bulk track listings carry Genre tags is unverified, check in the live contract suite
+        tracks = []
+        for section in self._music_sections(url, token):
+            path = f"/library/sections/{section}/all"
+            artists = {str(a["ratingKey"]): _tags(a) for a in self._pages(url, path, token, {"type": 8})}
+            albums = {str(a["ratingKey"]): _tags(a) for a in self._pages(url, path, token, {"type": 9})}
+            for t in self._pages(url, path, token, {"type": 10}):
+                album_key, artist_key = str(t.get("parentRatingKey", "")), str(t.get("grandparentRatingKey", ""))
+                tracks.append(
+                    LibraryTrack(
+                        rating_key=str(t["ratingKey"]),
+                        guid=t.get("guid", ""),
+                        title=t.get("title", ""),
+                        artist=t.get("originalTitle") or t.get("grandparentTitle", ""),
+                        album_artist=t.get("grandparentTitle", ""),
+                        album=t.get("parentTitle", ""),
+                        album_key=album_key,
+                        artist_key=artist_key,
+                        track_genres=_tags(t),
+                        album_genres=albums.get(album_key, ()),
+                        artist_genres=artists.get(artist_key, ()),
+                        popularity=t.get("ratingCount"),
+                    )
+                )
+        return tracks
+
+    def ratings(self, url: str, token: str) -> dict[str, float]:
+        ratings = {}
+        for section in self._music_sections(url, token):
+            for libtype in (8, 9, 10):
+                params = {"type": libtype, "userRating>": 0}  # sent as "userRating>>=0": rated items only
+                for item in self._pages(url, f"/library/sections/{section}/all", token, params):
+                    ratings[str(item["ratingKey"])] = float(item["userRating"])
+        return ratings
+
+    def playlist(self, url: str, token: str, playlist_id: str) -> PlexPlaylist | None:
+        try:
+            items = self._pms("GET", url, f"/playlists/{quote(playlist_id)}", token).get("Metadata", [])
+        except NotFound:
+            return None
+        if not items:
+            return None
+        item = items[0]
+        return PlexPlaylist(id=str(item["ratingKey"]), title=item.get("title", ""), summary=item.get("summary", ""))
+
+    def create_playlist(self, url: str, token: str, machine_id: str, title: str, rating_keys: list[str]) -> str:
+        params = {"uri": _metadata_uri(machine_id, rating_keys), "type": "audio", "title": title, "smart": 0}
+        return str(self._pms("POST", url, "/playlists", token, params)["Metadata"][0]["ratingKey"])
+
+    def clear_playlist(self, url: str, token: str, playlist_id: str) -> None:
+        self._pms("DELETE", url, f"/playlists/{quote(playlist_id)}/items", token)
+
+    def add_to_playlist(self, url: str, token: str, machine_id: str, playlist_id: str, rating_keys: list[str]) -> None:
+        params = {"uri": _metadata_uri(machine_id, rating_keys)}
+        self._pms("PUT", url, f"/playlists/{quote(playlist_id)}/items", token, params)
+
+    def set_playlist_summary(self, url: str, token: str, playlist_id: str, summary: str) -> None:
+        self._pms("PUT", url, f"/playlists/{quote(playlist_id)}", token, {"summary": summary})

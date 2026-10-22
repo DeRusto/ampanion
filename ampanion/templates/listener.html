@@ -3,7 +3,10 @@
 {% block main %}
 <header class="listener">
   <h1>{{ listener.name }}</h1>
-  <button type="button" disabled title="Refreshes arrive in a later version">Refresh now</button>
+  <form method="post" action="/listeners/{{ listener.account_id }}/refresh">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Refresh now</button>
+  </form>
   <a class="button" href="/listeners/{{ listener.account_id }}/turn-off">Turn off</a>
 </header>
 <nav class="tabs">
@@ -12,8 +15,20 @@
   {% endfor %}
 </nav>
 <section>
-  {% if tab == 'mixes' %}<p>No Mixes yet.</p>
+  {% if tab == 'mixes' %}
+  {% for mix, enabled, settings, playlists in mixes %}
+  <form class="mix" method="post" action="/listeners/{{ listener.account_id }}/mixes/{{ mix.key }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <h3>{{ mix.title }}</h3>
+    <label><input type="checkbox" name="enabled"{% if enabled %} checked{% endif %}> On</label>
+    {% for s in mix.settings %}
+    <label>{{ s.label }} <input type="number" name="{{ s.key }}" value="{{ settings[s.key] }}" min="{{ s.min }}" max="{{ s.max }}" required></label>
+    {% endfor %}
+    <button type="submit">Save</button>
+    <p class="status-line">{% for p in playlists %}{% if p.genre %}{{ p.genre }}: {% endif %}{{ p.status }}{% if not loop.last %}; {% endif %}{% else %}Not refreshed yet{% endfor %}</p>
+  </form>
+  {% endfor %}
   {% elif tab == 'playlists' %}<p>ampanion hasn't made any Playlists for {{ listener.name }} yet.</p>
-  {% else %}<p>No Refreshes yet.</p>{% endif %}
+  {% else %}{% include "refreshes.html" %}{% endif %}
 </section>
 {% endblock %}

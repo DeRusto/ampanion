@@ -48,7 +48,7 @@ def test_clicking_plus_makes_the_user_a_listener_and_shows_their_page(client, ho
     assert response.url.path == "/listeners/8"
     html = response.text
     assert "<h1>Pal</h1>" in html
-    assert "Refresh now" in html and "disabled" in html.split("Refresh now")[0].rsplit("<button", 1)[1]
+    assert "Refresh now" in html
     assert "Turn off" in html
     for tab in ("Mixes", "Playlists", "History"):
         assert f">{tab}<" in html

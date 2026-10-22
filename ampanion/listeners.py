@@ -12,6 +12,7 @@ from fastapi.templating import Jinja2Templates
 
 from ampanion.clock import Clock
 from ampanion.gateway import Gateway, GatewayError, PlexAccount
+from ampanion.mixes import MIXES, mix_config
 from ampanion.store import Store
 
 NO_SHARE = "No library share on this server"
@@ -23,6 +24,7 @@ class SidebarUser:
     account_id: int
     name: str
     state: str  # "listener", "available" or "unavailable"
+    status: str | None = None  # a Listener's latest Refresh: "refreshing", "failed" or "ok"
 
 
 def plex_users(store: Store, gateway: Gateway) -> list[tuple[PlexAccount, bool]]:
@@ -36,17 +38,20 @@ def sidebar_users(store: Store, gateway: Gateway) -> tuple[list[SidebarUser], st
     """The sidebar's Plex users and an error to show; stored Listeners are listed even when Plex can't be reached."""
     listeners = store.listeners()
     ids = {listener.account_id for listener in listeners}
+    states = store.refresh_states()
     try:
         # shortcut: asks plex.tv on every page view, cache the list if pages feel slow
         users = [
-            SidebarUser(u.id, u.username, "listener" if u.id in ids else "available" if ok else "unavailable")
+            SidebarUser(u.id, u.username, "listener" if u.id in ids else "available" if ok else "unavailable", states.get(u.id))
             for u, ok in plex_users(store, gateway)
         ]
         error = None
     except GatewayError:
         users, error = [], "Couldn't reach Plex to list its users."
     shown = {u.account_id for u in users}
-    users += [SidebarUser(l.account_id, l.name, "listener") for l in listeners if l.account_id not in shown]
+    users += [
+        SidebarUser(l.account_id, l.name, "listener", states.get(l.account_id)) for l in listeners if l.account_id not in shown
+    ]
     return users, error
 
 
@@ -77,7 +82,30 @@ def add_listener_routes(app: FastAPI, *, store: Store, gateway: Gateway, clock: 
         context = {"page": "listener", "listener": listener_or_404(account_id), "tabs": TABS, "tab": tab}
         if tab not in TABS:
             raise HTTPException(404, "No such tab")
+        context["mixes"] = [
+            (mix, *mix_config(store, account_id, mix), store.managed_playlists(account_id, mix.key))
+            for mix in MIXES.values()
+        ]
+        context["refreshes"] = store.refreshes(account_id)
         return templates.TemplateResponse(request, "listener.html", context)
+
+    @app.post("/listeners/{account_id}/mixes/{mix_key}")
+    async def save_mix(request: Request, account_id: int, mix_key: str):
+        listener_or_404(account_id)
+        if mix_key not in MIXES:
+            raise HTTPException(404, "No such Mix")
+        mix, form, settings = MIXES[mix_key], await request.form(), {}
+        for s in mix.settings:
+            try:
+                value = int(form.get(s.key, ""))
+            except ValueError:
+                raise HTTPException(400, f"{s.label} must be a whole number") from None
+            if not s.min <= value <= s.max:
+                raise HTTPException(400, f"{s.label} must be between {s.min} and {s.max}")
+            settings[s.key] = value
+        # shortcut: turning a Mix off neither confirms nor deletes its Playlists, the Playlist lifecycle ticket (#29) does
+        store.set_mix_settings(account_id, mix.key, form.get("enabled") == "on", settings)
+        return RedirectResponse(f"/listeners/{account_id}", 303)
 
     @app.get("/listeners/{account_id}/turn-off")
     def confirm_turn_off(request: Request, account_id: int):

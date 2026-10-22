@@ -10,6 +10,7 @@ from ampanion.auth import PUBLIC_PATHS, SESSION_MAX_AGE, add_sign_in_routes, csr
 from ampanion.clock import Clock
 from ampanion.gateway import Gateway, GatewayError
 from ampanion.listeners import add_listener_routes, sidebar_users
+from ampanion.refresh import add_refresh_routes
 from ampanion.server import add_server_routes, choose, owned_servers
 from ampanion.store import Store
 
@@ -50,6 +51,7 @@ def create_app(*, config_dir: Path, gateway: Gateway, clock: Clock, rng: Random)
     add_sign_in_routes(app, store=store, gateway=gateway, clock=clock, templates=templates)
     add_server_routes(app, store=store, gateway=gateway)
     add_listener_routes(app, store=store, gateway=gateway, clock=clock, templates=templates)
+    add_refresh_routes(app, store=store, gateway=gateway, clock=clock, rng=rng)
 
     @app.get("/health")
     def health():
@@ -78,6 +80,7 @@ def create_app(*, config_dir: Path, gateway: Gateway, clock: Clock, rng: Random)
             "setup_complete": checklist["server"] and checklist["listener"],
             "servers": servers,
             "plex_error": plex_error,
+            "refreshes": store.refreshes(),
         }
         return templates.TemplateResponse(request, "home.html", context)
 

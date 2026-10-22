@@ -1,9 +1,21 @@
 """The Gateway's contract: the fake and the real one must agree on results and typed errors."""
 
+from datetime import datetime, timezone
+
 import httpx
 import pytest
 
-from ampanion.gateway import GatewayError, PlexAccount, PlexConnection, PlexGateway, PlexResource, TokenExpired, Unreachable
+from ampanion.gateway import (
+    GatewayError,
+    HistoryEntry,
+    PlexAccount,
+    PlexConnection,
+    PlexGateway,
+    PlexPlaylist,
+    PlexResource,
+    TokenExpired,
+    Unreachable,
+)
 from tests.fakes import FakeGateway
 
 
@@ -158,3 +170,129 @@ def test_shared_tokens_are_the_server_tokens_of_users_with_a_share_on_that_serve
     fake.add_user("owner-token", "Kid", account_id=7)
     fake.add_user("owner-token", "Pal", account_id=8, share=server)
     assert fake.shared_tokens("owner-token", "m1") == {8: "Pal-server-token"}
+
+
+URL = "http://pms:32400"
+
+
+def plex_server(routes) -> tuple[PlexGateway, list[httpx.Request]]:
+    """A Plex server answering `routes(request)` with (status, MediaContainer body or None)."""
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        status, body = routes(request)
+        return httpx.Response(status, json={"MediaContainer": body} if body is not None else None)
+
+    return PlexGateway(client_identifier="test-client", http=httpx.Client(transport=httpx.MockTransport(handle))), requests
+
+
+def music_library(request, listings):
+    """/library/sections with one music section "3", and its listings by type, paged like Plex."""
+    if request.url.path == "/library/sections":
+        return 200, {"Directory": [{"key": "1", "type": "movie"}, {"key": "3", "type": "artist"}]}
+    items = listings[request.url.params["type"]]
+    start, size = int(request.url.params["X-Plex-Container-Start"]), int(request.url.params["X-Plex-Container-Size"])
+    return 200, {"totalSize": len(items), "Metadata": items[start : start + size]}
+
+
+def test_history_is_read_for_an_account_with_paging_and_an_optional_start():
+    entries = [
+        {"historyKey": f"/h/{n}", "ratingKey": f"{n}", "type": "track", "title": f"S{n}", "grandparentTitle": "AA",
+         "parentTitle": "Al", "viewedAt": 1767614400 - n}
+        for n in range(1500)
+    ] + [{"historyKey": "/h/m", "ratingKey": "99", "type": "movie", "title": "Film", "viewedAt": 1}]
+    def page(request):
+        start, size = int(request.url.params["X-Plex-Container-Start"]), int(request.url.params["X-Plex-Container-Size"])
+        return 200, {"totalSize": len(entries), "Metadata": entries[start : start + size]}
+
+    real, requests = plex_server(page)
+
+    got = real.history(URL, "owner-token", 8, since=datetime(2026, 1, 1, tzinfo=timezone.utc))
+
+    assert len(got) == 1500 and got[0] == HistoryEntry(
+        "/h/0", "0", datetime(2026, 1, 5, 12, tzinfo=timezone.utc), "S0", "AA", "AA", "Al"
+    )
+    assert requests[0].url.path == "/status/sessions/history/all"
+    assert requests[0].url.params["accountID"] == "8"
+    assert requests[0].url.params["viewedAt>"] == "1767225600"
+    assert requests[0].headers["X-Plex-Token"] == "owner-token"
+    real.history(URL, "owner-token", 8, since=None)
+    assert "viewedAt>" not in requests[-1].url.params
+
+    fake = fake_with_owner()
+    fake.add_track("0", artist="AA", album="Al", title="S0")
+    fake.play(8, "0", at=datetime(2026, 1, 5, 12, tzinfo=timezone.utc))
+    fake.play(8, "0", at=datetime(2025, 12, 1, tzinfo=timezone.utc))
+    [entry] = fake.history(URL, "owner-token", 8, since=datetime(2026, 1, 1, tzinfo=timezone.utc))
+    assert (entry.rating_key, entry.title, entry.album_artist, entry.album) == ("0", "S0", "AA", "Al")
+
+
+def test_library_tracks_carry_their_album_and_artist_genres():
+    listings = {
+        "8": [{"ratingKey": 10, "Genre": [{"tag": "Rock"}]}],
+        "9": [{"ratingKey": 20, "Genre": [{"tag": "Indie"}]}, {"ratingKey": 21}],
+        "10": [
+            {"ratingKey": 30, "guid": "plex://track/a", "title": "A", "grandparentTitle": "Band", "parentTitle": "LP",
+             "parentRatingKey": 20, "grandparentRatingKey": 10, "ratingCount": 5000},
+            {"ratingKey": 31, "guid": "plex://track/b", "title": "B", "originalTitle": "Guest", "grandparentTitle": "Band",
+             "parentTitle": "EP", "parentRatingKey": 21, "grandparentRatingKey": 10},
+        ],
+    }
+    real, _ = plex_server(lambda r: music_library(r, listings))
+
+    a, b = real.library_tracks(URL, "owner-token")
+
+    assert (a.rating_key, a.album_key, a.artist_key, a.genres, a.popularity) == ("30", "20", "10", ("Indie",), 5000)
+    assert (b.artist, b.album_artist, b.genres, b.popularity) == ("Guest", "Band", ("Rock",), None)
+
+
+def test_ratings_are_the_rated_tracks_albums_and_artists_of_the_token_account():
+    listings = {"8": [{"ratingKey": 10, "userRating": 2.0}], "9": [], "10": [{"ratingKey": 30, "userRating": 8.0}]}
+    real, requests = plex_server(lambda r: music_library(r, listings))
+
+    assert real.ratings(URL, "pal-token") == {"10": 2.0, "30": 8.0}
+    assert all(r.headers["X-Plex-Token"] == "pal-token" for r in requests)
+    assert all(r.url.params["userRating>"] == "0" for r in requests if r.url.path.endswith("/all"))
+
+    fake = fake_with_owner()
+    fake.rate("owner-token", "30", stars=4)
+    assert fake.ratings(URL, "owner-token") == {"30": 8.0}
+
+
+def test_playlists_are_created_read_cleared_filled_and_summarised_with_the_token_account():
+    def routes(request):
+        match request.method, request.url.path:
+            case "POST", "/playlists":
+                return 200, {"Metadata": [{"ratingKey": 77}]}
+            case "GET", "/playlists/77":
+                return 200, {"Metadata": [{"ratingKey": 77, "title": "On Repeat", "summary": "s"}]}
+            case "GET", _:
+                return 404, None
+        return 200, None
+
+    real, requests = plex_server(routes)
+
+    assert real.create_playlist(URL, "pal-token", "m1", "On Repeat", ["1", "2"]) == "77"
+    assert requests[-1].url.params["uri"] == "server://m1/com.plexapp.plugins.library/library/metadata/1,2"
+    assert (requests[-1].url.params["type"], requests[-1].url.params["smart"]) == ("audio", "0")
+    assert real.playlist(URL, "pal-token", "77") == PlexPlaylist("77", "On Repeat", "s")
+    assert real.playlist(URL, "pal-token", "78") is None
+    real.clear_playlist(URL, "pal-token", "77")
+    assert (requests[-1].method, requests[-1].url.path) == ("DELETE", "/playlists/77/items")
+    real.add_to_playlist(URL, "pal-token", "m1", "77", ["3"])
+    assert (requests[-1].method, requests[-1].url.params["uri"]) == ("PUT", "server://m1/com.plexapp.plugins.library/library/metadata/3")
+    real.set_playlist_summary(URL, "pal-token", "77", "Made by ampanion")
+    assert (requests[-1].method, requests[-1].url.path, requests[-1].url.params["summary"]) == ("PUT", "/playlists/77", "Made by ampanion")
+    assert all(r.headers["X-Plex-Token"] == "pal-token" for r in requests)
+    with pytest.raises(TokenExpired):
+        plex_server(lambda r: (401, None))[0].clear_playlist(URL, "pal-token", "77")
+
+    fake = fake_with_owner()
+    playlist_id = fake.create_playlist(URL, "owner-token", "m1", "On Repeat", ["1", "2"])
+    fake.clear_playlist(URL, "owner-token", playlist_id)
+    fake.add_to_playlist(URL, "owner-token", "m1", playlist_id, ["3"])
+    fake.set_playlist_summary(URL, "owner-token", playlist_id, "s")
+    assert fake.playlist(URL, "owner-token", playlist_id) == PlexPlaylist(playlist_id, "On Repeat", "s")
+    assert fake.playlists_of("owner-token")[0].items == ["3"]
+    assert fake.playlist(URL, "owner-token", "nope") is None

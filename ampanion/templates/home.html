@@ -26,4 +26,8 @@
   </ol>
 </section>
 {% endif %}
+<section>
+  <h2>Recent Refreshes</h2>
+  {% with show_listener = true %}{% include "refreshes.html" %}{% endwith %}
+</section>
 {% endblock %}

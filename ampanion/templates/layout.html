@@ -16,7 +16,7 @@
     <a class="item{% if page == 'home' %} on{% endif %}" href="/">Home</a>
     {% for user in sidebar_users %}
       {% if user.state == 'listener' %}
-    <a class="item{% if listener and listener.account_id == user.account_id %} on{% endif %}" href="/listeners/{{ user.account_id }}">{{ user.name }}</a>
+    <a class="item{% if listener and listener.account_id == user.account_id %} on{% endif %}" href="/listeners/{{ user.account_id }}">{{ user.name }}{% if user.status %} <span class="status {{ user.status }}" title="Last Refresh: {{ user.status }}" aria-label="Last Refresh: {{ user.status }}">{{ {'ok': '✓', 'failed': '!', 'refreshing': '↻'}[user.status] }}</span>{% endif %}</a>
       {% elif user.state == 'available' %}
     <form class="item add" method="post" action="/listeners">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

@@ -54,3 +54,16 @@ main { flex: 1; max-width: 960px; padding: 16px 24px; }
 .tabs { display: flex; gap: 16px; border-bottom: 1px solid var(--line); margin: 12px 0; }
 .tabs a { padding: 6px 0; color: var(--dim); text-decoration: none; }
 .tabs a.on { color: var(--text); box-shadow: inset 0 -2px var(--accent); }
+.listener form { margin: 0; }
+
+.sidebar .status { float: right; font-weight: 700; }
+.sidebar .status.ok { color: var(--ok); }
+.sidebar .status.failed { color: var(--bad); }
+.sidebar .status.refreshing { color: var(--accent); }
+.mix { background: var(--panel); border-radius: 8px; padding: 12px; margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; }
+.mix h3 { width: 100%; margin: 0; }
+.mix input[type=number] { width: 5em; }
+.mix .status-line { width: 100%; margin: 0; color: var(--dim); }
+.refreshes { width: 100%; border-collapse: collapse; }
+.refreshes th, .refreshes td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.refreshes tr.failed td:nth-last-child(2) { color: var(--bad); }

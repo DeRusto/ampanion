@@ -1,5 +1,6 @@
 """SQLite store in /config: all of ampanion's state lives in one file."""
 
+import json
 import secrets
 import sqlite3
 import uuid
@@ -19,6 +20,44 @@ CREATE TABLE IF NOT EXISTS listeners (
     name       TEXT NOT NULL,
     added_at   TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS plays (
+    account_id   INTEGER NOT NULL,
+    history_key  TEXT NOT NULL,  -- Plex's historyKey
+    played_at    TEXT NOT NULL,
+    rating_key   TEXT NOT NULL,  -- the track's current rating key, re-linked by guid when Plex changes it
+    guid         TEXT,
+    title        TEXT NOT NULL,
+    artist       TEXT NOT NULL,
+    album_artist TEXT NOT NULL,
+    album        TEXT NOT NULL,
+    PRIMARY KEY (account_id, history_key)
+);
+CREATE TABLE IF NOT EXISTS mix_settings (
+    account_id INTEGER NOT NULL,
+    mix        TEXT NOT NULL,
+    enabled    INTEGER NOT NULL,
+    settings   TEXT NOT NULL,  -- JSON object of the Mix's numeric settings
+    PRIMARY KEY (account_id, mix)
+);
+CREATE TABLE IF NOT EXISTS managed_playlists (
+    account_id   INTEGER NOT NULL,
+    mix          TEXT NOT NULL,
+    genre        TEXT NOT NULL DEFAULT '',  -- Genre Mix only
+    playlist_id  TEXT,                      -- none until a Playlist has been published
+    tracks       TEXT NOT NULL DEFAULT '[]', -- JSON list of the rating keys last published
+    status       TEXT NOT NULL,
+    refreshed_at TEXT NOT NULL,
+    PRIMARY KEY (account_id, mix, genre)
+);
+CREATE TABLE IF NOT EXISTS refreshes (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_id INTEGER,           -- none for the "Plex sign-in expired" record
+    started_at TEXT NOT NULL,
+    ended_at   TEXT,              -- none while the Refresh runs
+    outcome    TEXT,              -- "ok" or "failed"
+    mixes      TEXT NOT NULL DEFAULT '[]',  -- JSON list of {"mix", "outcome", "detail"}
+    error      TEXT
+);
 """
 
 
@@ -27,6 +66,37 @@ class Listener:
     account_id: int
     name: str
 
+
+@dataclass(frozen=True)
+class Play:
+    played_at: datetime
+    rating_key: str
+    guid: str | None
+    title: str
+    artist: str
+    album_artist: str
+    album: str
+
+
+@dataclass(frozen=True)
+class ManagedPlaylist:
+    mix: str
+    genre: str | None
+    playlist_id: str | None
+    tracks: list[str]
+    status: str
+    refreshed_at: datetime
+
+
+@dataclass(frozen=True)
+class RefreshRecord:
+    account_id: int | None
+    listener_name: str | None
+    started_at: datetime
+    ended_at: datetime | None
+    outcome: str | None  # None while running
+    mixes: list[dict]  # {"mix", "outcome", "detail"}
+    error: str | None
 
 
 class Store:
@@ -136,4 +206,107 @@ class Store:
     def remove_listener(self, account_id: int) -> None:
         """Forget everything stored for the Listener. Later tables (Plays, Skips, Mix settings...) are deleted here too."""
         with self.connect() as db:
-            db.execute("DELETE FROM listeners WHERE account_id = ?", (account_id,))
+            for table in ("listeners", "plays", "mix_settings", "managed_playlists", "refreshes"):
+                db.execute(f"DELETE FROM {table} WHERE account_id = ?", (account_id,))
+
+    # --- Listening history ---
+
+    def has_plays(self, account_id: int) -> bool:
+        with self.connect() as db:
+            return db.execute("SELECT 1 FROM plays WHERE account_id = ? LIMIT 1", (account_id,)).fetchone() is not None
+
+    def add_plays(self, account_id: int, plays: list[tuple[str, Play]]) -> None:
+        """Insert (historyKey, Play) pairs; ones already stored are left as they are."""
+        with self.connect() as db:
+            db.executemany(
+                "INSERT OR IGNORE INTO plays VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (account_id, key, p.played_at.isoformat(), p.rating_key, p.guid, p.title, p.artist, p.album_artist, p.album)
+                    for key, p in plays
+                ],
+            )
+
+    def plays(self, account_id: int) -> list[Play]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT played_at, rating_key, guid, title, artist, album_artist, album FROM plays WHERE account_id = ?",
+                (account_id,),
+            ).fetchall()
+        return [Play(datetime.fromisoformat(r[0]), *r[1:]) for r in rows]
+
+    def relink_plays(self, account_id: int, guid: str, rating_key: str) -> None:
+        with self.connect() as db:
+            db.execute("UPDATE plays SET rating_key = ? WHERE account_id = ? AND guid = ?", (rating_key, account_id, guid))
+
+    # --- Mixes and their Playlists ---
+
+    def mix_settings(self, account_id: int, mix: str) -> tuple[bool, dict] | None:
+        """(enabled, settings) as last saved, or None if never saved."""
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT enabled, settings FROM mix_settings WHERE account_id = ? AND mix = ?", (account_id, mix)
+            ).fetchone()
+        return (bool(row[0]), json.loads(row[1])) if row else None
+
+    def set_mix_settings(self, account_id: int, mix: str, enabled: bool, settings: dict) -> None:
+        with self.connect() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO mix_settings VALUES (?, ?, ?, ?)", (account_id, mix, enabled, json.dumps(settings))
+            )
+
+    def managed_playlists(self, account_id: int, mix: str) -> list[ManagedPlaylist]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT mix, genre, playlist_id, tracks, status, refreshed_at FROM managed_playlists"
+                " WHERE account_id = ? AND mix = ? ORDER BY genre",
+                (account_id, mix),
+            ).fetchall()
+        return [ManagedPlaylist(r[0], r[1] or None, r[2], json.loads(r[3]), r[4], datetime.fromisoformat(r[5])) for r in rows]
+
+    def save_managed_playlist(self, account_id: int, playlist: ManagedPlaylist) -> None:
+        p = playlist
+        with self.connect() as db:
+            db.execute(
+                "INSERT OR REPLACE INTO managed_playlists VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (account_id, p.mix, p.genre or "", p.playlist_id, json.dumps(p.tracks), p.status, p.refreshed_at.isoformat()),
+            )
+
+    # --- Refresh records ---
+
+    def start_refresh(self, account_id: int | None, started_at: datetime) -> int:
+        with self.connect() as db:
+            cursor = db.execute(
+                "INSERT INTO refreshes (account_id, started_at) VALUES (?, ?)", (account_id, started_at.isoformat())
+            )
+            return cursor.lastrowid
+
+    def finish_refresh(self, refresh_id: int, ended_at: datetime, outcome: str, mixes: list[dict], error: str | None):
+        with self.connect() as db:
+            db.execute(
+                "UPDATE refreshes SET ended_at = ?, outcome = ?, mixes = ?, error = ? WHERE id = ?",
+                (ended_at.isoformat(), outcome, json.dumps(mixes), error, refresh_id),
+            )
+
+    def refreshes(self, account_id: int | None = None, limit: int = 20) -> list[RefreshRecord]:
+        """The newest Refresh records first, all Listeners' or one Listener's."""
+        where, args = ("WHERE r.account_id = ?", (account_id,)) if account_id is not None else ("", ())
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT r.account_id, l.name, r.started_at, r.ended_at, r.outcome, r.mixes, r.error"
+                f" FROM refreshes r LEFT JOIN listeners l ON l.account_id = r.account_id {where}"
+                " ORDER BY r.id DESC LIMIT ?",
+                (*args, limit),
+            ).fetchall()
+        return [
+            RefreshRecord(r[0], r[1], datetime.fromisoformat(r[2]), r[3] and datetime.fromisoformat(r[3]), r[4], json.loads(r[5]), r[6])
+            for r in rows
+        ]
+
+    def refresh_states(self) -> dict[int, str]:
+        """Each Listener's latest Refresh: "refreshing", "failed" or "ok"."""
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT account_id, outcome FROM refreshes WHERE id IN"
+                " (SELECT MAX(id) FROM refreshes WHERE account_id IS NOT NULL GROUP BY account_id)"
+            ).fetchall()
+        return {account_id: outcome or "refreshing" for account_id, outcome in rows}

@@ -1,16 +1,36 @@
 """In-memory stand-ins for everything outside ampanion. Tests set up the world here, then drive the app."""
 
 import itertools
-from dataclasses import dataclass, replace
+from collections import defaultdict
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 
-from ampanion.gateway import Pin, PlexAccount, PlexConnection, PlexResource, TokenExpired, Unreachable
+from ampanion.gateway import (
+    HistoryEntry,
+    LibraryTrack,
+    NotFound,
+    Pin,
+    PlexAccount,
+    PlexConnection,
+    PlexPlaylist,
+    PlexResource,
+    TokenExpired,
+    Unreachable,
+)
 
 
 @dataclass
 class FakePin:
     pin: Pin
     token: str | None = None
+
+
+@dataclass
+class FakePlaylist:
+    id: str
+    title: str
+    summary: str = ""
+    items: list[str] = field(default_factory=list)
 
 
 class FakeGateway:
@@ -24,6 +44,13 @@ class FakeGateway:
         self._users_by_account: dict[int, list[PlexAccount]] = {}
         self._shared_tokens: dict[str, dict[int, str]] = {}  # machineIdentifier -> {account id: server token}
         self._ids = itertools.count(1)
+        # The one Plex server's music library, history and per-account state (single-server world).
+        self._tracks: dict[str, LibraryTrack] = {}
+        self._history: list[tuple[int, HistoryEntry]] = []  # (local account id, entry)
+        self._ratings: dict[str, dict[str, float]] = defaultdict(dict)  # token -> rating key -> 0-10
+        self._playlists: dict[str, list[FakePlaylist]] = defaultdict(list)  # token -> its account's Playlists
+        self.item_batches: dict[str, list[int]] = defaultdict(list)  # token -> size of each create/add call
+        self.history_down = False
 
     # --- set up the world ---
 
@@ -88,6 +115,61 @@ class FakeGateway:
     def pin_by_code(self, code: str) -> FakePin:
         return next(p for p in self._pins.values() if p.pin.code == code)
 
+    def add_track(self, rating_key: str, artist: str = "Artist", album: str = "Album", **fields) -> LibraryTrack:
+        """A library track; its album and artist keys are "album-<album>" and "artist-<artist>"."""
+        track = LibraryTrack(
+            **{
+                "rating_key": rating_key,
+                "guid": f"plex://track/{rating_key}",
+                "title": f"Song {rating_key}",
+                "artist": artist,
+                "album_artist": artist,
+                "album": album,
+                "album_key": f"album-{album}",
+                "artist_key": f"artist-{artist}",
+            }
+            | fields
+        )
+        self._tracks[rating_key] = track
+        return track
+
+    def rekey_track(self, old: str, new: str) -> None:
+        """Plex gives the track a new rating key (e.g. after a rescan), keeping its guid."""
+        self._tracks[new] = replace(self._tracks.pop(old), rating_key=new)
+
+    def remove_track(self, rating_key: str) -> None:
+        del self._tracks[rating_key]
+
+    def play(self, account_id: int, rating_key: str, at: datetime) -> str:
+        """The local account (the Owner is 1) plays the track to the end, so Plex logs it in history."""
+        track = self._tracks[rating_key]
+        key = f"/status/sessions/history/{next(self._ids)}"
+        entry = HistoryEntry(key, rating_key, at, track.title, track.artist, track.album_artist, track.album)
+        self._history.append((account_id, entry))
+        return key
+
+    def clear_history(self, account_id: int) -> None:
+        """An admin deletes the account's history in Plex."""
+        self._history = [(a, e) for a, e in self._history if a != account_id]
+
+    def rate(self, token: str, rating_key: str, stars: float) -> None:
+        self._ratings[token][rating_key] = stars * 2
+
+    def playlists_of(self, token: str) -> list[FakePlaylist]:
+        return list(self._playlists[token])
+
+    def _server_token(self, token: str) -> None:
+        """Plex server calls take an account token or a shared server token; anything else is refused."""
+        shared = {t for tokens in self._shared_tokens.values() for t in tokens.values()}
+        if token not in self._accounts_by_token and token not in shared:
+            raise TokenExpired("The Plex server rejected the token")
+
+    def _playlist(self, token: str, playlist_id: str) -> FakePlaylist:
+        found = next((p for p in self._playlists[token] if p.id == playlist_id), None)
+        if found is None:
+            raise NotFound(f"Plex server has no /playlists/{playlist_id}")
+        return found
+
     # --- Gateway operations ---
 
     def check_token(self, token: str) -> PlexAccount:
@@ -120,6 +202,51 @@ class FakeGateway:
     def shared_tokens(self, token: str, machine_id: str) -> dict[int, str]:
         self.check_token(token)
         return dict(self._shared_tokens.get(machine_id, {}))
+
+
+    def history(self, url: str, token: str, account_id: int, since: datetime | None) -> list[HistoryEntry]:
+        self._server_token(token)
+        if self.history_down:
+            raise Unreachable("Plex server answered 500")
+        entries = [e for a, e in self._history if a == account_id and (since is None or e.played_at >= since)]
+        return sorted(entries, key=lambda e: e.played_at, reverse=True)
+
+    def library_tracks(self, url: str, token: str) -> list[LibraryTrack]:
+        self._server_token(token)
+        return list(self._tracks.values())
+
+    def ratings(self, url: str, token: str) -> dict[str, float]:
+        self._server_token(token)
+        return dict(self._ratings[token])
+
+    def playlist(self, url: str, token: str, playlist_id: str) -> PlexPlaylist | None:
+        self._server_token(token)
+        try:
+            p = self._playlist(token, playlist_id)
+        except NotFound:
+            return None
+        return PlexPlaylist(p.id, p.title, p.summary)
+
+    def create_playlist(self, url: str, token: str, machine_id: str, title: str, rating_keys: list[str]) -> str:
+        self._server_token(token)
+        assert rating_keys, "Plex refuses to create an empty Playlist"
+        playlist = FakePlaylist(id=str(next(self._ids)), title=title, items=list(rating_keys))
+        self._playlists[token].append(playlist)
+        self.item_batches[token].append(len(rating_keys))
+        return playlist.id
+
+    def clear_playlist(self, url: str, token: str, playlist_id: str) -> None:
+        self._server_token(token)
+        self._playlist(token, playlist_id).items.clear()
+
+    def add_to_playlist(self, url: str, token: str, machine_id: str, playlist_id: str, rating_keys: list[str]) -> None:
+        self._server_token(token)
+        self._playlist(token, playlist_id).items.extend(rating_keys)
+        self.item_batches[token].append(len(rating_keys))
+
+    def set_playlist_summary(self, url: str, token: str, playlist_id: str, summary: str) -> None:
+        self._server_token(token)
+        self._playlist(token, playlist_id).summary = summary
 
 
 class FakeClock:

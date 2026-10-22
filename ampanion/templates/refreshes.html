@@ -1,0 +1,17 @@
+{# Refresh records, newest first. Set show_listener to add a Listener column. #}
+{% if refreshes %}
+<table class="refreshes">
+  <thead><tr><th>Time (UTC)</th>{% if show_listener %}<th>Listener</th>{% endif %}<th>Outcome</th><th>Detail</th></tr></thead>
+  <tbody>
+  {% for r in refreshes %}
+  <tr class="{{ r.outcome or 'refreshing' }}">
+    {# shortcut: times show in UTC, the scheduling ticket (#34) shows them in TZ #}
+    <td>{{ r.started_at.strftime('%Y-%m-%d %H:%M') }}</td>
+    {% if show_listener %}<td>{{ r.listener_name or '' }}</td>{% endif %}
+    <td>{{ r.outcome or 'refreshing' }}</td>
+    <td>{% for m in r.mixes %}{{ m.detail }}{% if not loop.last %}; {% endif %}{% endfor %}{% if r.error %}<span class="error">{{ r.error }}</span>{% endif %}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p>No Refreshes yet.</p>{% endif %}
