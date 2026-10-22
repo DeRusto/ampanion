@@ -331,6 +331,12 @@ class Store:
         with self.connect() as db:
             db.execute("DELETE FROM managed_playlists WHERE account_id = ? AND mix = ?", (account_id, mix))
 
+    def forget_managed_playlist(self, account_id: int, mix: str, genre: str | None) -> None:
+        with self.connect() as db:
+            db.execute(
+                "DELETE FROM managed_playlists WHERE account_id = ? AND mix = ? AND genre = ?", (account_id, mix, genre or "")
+            )
+
     # --- Refresh records ---
 
     def start_refresh(self, account_id: int | None, started_at: datetime) -> int:
