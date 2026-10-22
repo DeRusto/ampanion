@@ -1,0 +1,239 @@
+<!doctype html>
+<!--
+  PROTOTYPE, throwaway. Answers "Rough web UI page flow" (DeRusto/ampanion#17).
+  Three structurally different page flows for the v1 owner-only web UI, switchable via ?variant=A|B|C
+  and the floating bar (or ← →). Everything is in memory; reload to start over. ?firstrun=1 starts at sign-in.
+  Assumption: no app code exists yet, so this is a standalone page (sub-shape B), double-click to open.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ampanion UI flow (prototype)</title>
+<style>
+  :root { --bg:#16181d; --panel:#1f232b; --line:#2e3440; --text:#e6e6e6; --dim:#9aa3b2; --accent:#e5a00d; --ok:#4caf50; --bad:#e05252; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui, sans-serif; background:var(--bg); color:var(--text); padding-bottom:80px; }
+  a { color:var(--accent); cursor:pointer; }
+  button { font:inherit; background:var(--panel); color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 12px; cursor:pointer; }
+  button.primary { background:var(--accent); color:#111; border-color:var(--accent); font-weight:600; }
+  input, select { font:inherit; background:#111; color:var(--text); border:1px solid var(--line); border-radius:4px; padding:4px 6px; }
+  input[type=number] { width:70px; }
+  h1,h2,h3 { margin:.2em 0 .6em; }
+  .dim { color:var(--dim); }
+  .ok { color:var(--ok); } .bad { color:var(--bad); }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:16px; margin-bottom:16px; }
+  .row { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .grow { flex:1; }
+  .banner { background:#3a2a10; border-bottom:1px solid var(--accent); padding:8px 16px; }
+  .top { display:flex; align-items:center; gap:16px; padding:10px 16px; border-bottom:1px solid var(--line); }
+  .top .brand { font-weight:700; color:var(--accent); }
+  .wrap { max-width:960px; margin:0 auto; padding:16px; }
+  table { border-collapse:collapse; width:100%; }
+  td, th { border-bottom:1px solid var(--line); padding:8px; text-align:left; vertical-align:top; }
+  .steps { display:flex; gap:8px; margin-bottom:16px; }
+  .steps span { padding:4px 10px; border-radius:12px; background:var(--panel); color:var(--dim); }
+  .steps span.on { background:var(--accent); color:#111; }
+  .side { width:220px; border-right:1px solid var(--line); min-height:calc(100vh - 50px); padding:12px; }
+  .side .item { padding:8px; border-radius:6px; cursor:pointer; }
+  .side .item.on { background:var(--panel); }
+  .tabs { display:flex; gap:4px; border-bottom:1px solid var(--line); margin-bottom:16px; }
+  .tabs a { padding:8px 12px; text-decoration:none; color:var(--dim); }
+  .tabs a.on { color:var(--text); border-bottom:2px solid var(--accent); }
+  .cell { cursor:pointer; text-align:center; }
+  .drawer { position:fixed; right:0; top:0; bottom:0; width:340px; background:var(--panel); border-left:1px solid var(--line); padding:16px; overflow:auto; box-shadow:-8px 0 24px #0008; }
+  .mix { border:1px solid var(--line); border-radius:6px; padding:10px; margin-bottom:8px; }
+  .mix .settings { margin-top:8px; display:flex; gap:12px; flex-wrap:wrap; }
+  #switcher { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:#fff; color:#000; border-radius:999px; padding:6px 10px; display:flex; gap:10px; align-items:center; box-shadow:0 4px 16px #000a; font-weight:600; z-index:99; }
+  #switcher button { background:#000; color:#fff; border:none; border-radius:999px; padding:4px 10px; }
+  #state { position:fixed; left:8px; bottom:8px; font:11px monospace; color:var(--dim); max-width:300px; white-space:pre-wrap; opacity:.7; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="switcher"><button onclick="cycle(-1)">←</button><span id="vlabel"></span><button onclick="cycle(1)">→</button></div>
+<div id="state"></div>
+<script>
+// ---------- fake data, all in memory ----------
+const MIXES = [
+  { key:'onrepeat', name:'On Repeat', cadence:'daily', settings:{ 'Window (days)':30, 'Length':30 } },
+  { key:'deepcuts', name:'Deep Cuts', cadence:'weekly', settings:{ 'Length':30, 'Max per artist':3 } },
+  { key:'genre', name:'Genre Mix', cadence:'weekly', settings:{ 'Playlists':3, 'Length':50, 'Max per artist':3 } },
+  { key:'daily', name:'Daily Mixtape', cadence:'daily', settings:{ 'Length':50, 'Max per artist':2, 'Fresh share (%)':40 } },
+  { key:'newartists', name:'New Artists', cadence:'weekly', settings:{ 'Length':30, 'Max per artist':3 } },
+];
+const PLEX_USERS = ['derusto (owner)', 'sam', 'alex', 'kids'];
+const S = {
+  variant: new URLSearchParams(location.search).get('variant') || 'A',
+  signedIn: !new URLSearchParams(location.search).get('firstrun'),
+  server: new URLSearchParams(location.search).get('firstrun') ? null : 'Basement NAS (192.168.1.20:32400)',
+  tautulli: { url:'', key:'', ok:false },
+  tokenExpired: false,
+  setupStep: 0,
+  page: 'home', listener: null, tab: 'mixes', drawer: null,
+  listeners: {},
+};
+function newListener(name) {
+  return { name, mixes: Object.fromEntries(MIXES.map(m => [m.key, { on: true, cadence: m.cadence, settings: {...m.settings} }])),
+           refreshing: false, last: null, log: [] };
+}
+if (S.server) { S.listeners['derusto (owner)'] = newListener('derusto (owner)'); S.listeners['sam'] = newListener('sam');
+  S.listeners['derusto (owner)'].last = { at:'today 04:00', ok:true, detail:'history +212 Plays; 7 Playlists rebuilt' };
+  S.listeners['sam'].last = { at:'today 04:02', ok:false, detail:'Deep Cuts failed: Plex timed out; old Playlist kept' };
+  S.listeners['derusto (owner)'].log = [S.listeners['derusto (owner)'].last, { at:'yesterday 04:00', ok:true, detail:'history +98 Plays; 2 Playlists rebuilt' }];
+  S.listeners['sam'].log = [S.listeners['sam'].last]; }
+
+const playlistNames = l => MIXES.filter(m => l.mixes[m.key].on)
+  .flatMap(m => m.key === 'genre' ? ['Indie Rock Mix','Jazz Mix','Electronic Mix'].slice(0, l.mixes.genre.settings['Playlists']) : [m.name]);
+
+// ---------- actions ----------
+function go(page, extra = {}) { Object.assign(S, { page, drawer:null }, extra); render(); }
+function refresh(names) {
+  names.forEach(n => S.listeners[n].refreshing = true); render();
+  setTimeout(() => { names.forEach(n => { const l = S.listeners[n]; l.refreshing = false;
+    l.last = { at:'just now', ok:true, detail:`history +${Math.floor(Math.random()*40)} Plays; ${playlistNames(l).length} Playlists rebuilt` }; l.log.unshift(l.last); }); render(); }, 1200);
+}
+function toggleListener(n) {
+  if (S.listeners[n]) { if (confirm(`Turn off ${n}? Their ampanion Playlists will be deleted from Plex.`)) delete S.listeners[n]; }
+  else { S.listeners[n] = newListener(n); refresh([n]); }
+  render();
+}
+function toggleMix(n, k) {
+  const m = S.listeners[n].mixes[k];
+  if (m.on && !confirm(`Turn off ${MIXES.find(x=>x.key===k).name} for ${n}? Its Playlist(s) will be deleted from Plex.`)) return;
+  m.on = !m.on; render();
+}
+function setSetting(n, k, s, v) { S.listeners[n].mixes[k].settings[s] = +v; renderState(); }
+function setCadence(n, k, v) { S.listeners[n].mixes[k].cadence = v; renderState(); }
+function signIn() { S.signedIn = true; S.tokenExpired = false; render(); }
+
+// ---------- shared bits (kept small; layouts are per variant) ----------
+const status = l => l.refreshing ? '<span class="dim">refreshing…</span>'
+  : !l.last ? '<span class="dim">never</span>'
+  : `<span class="${l.last.ok?'ok':'bad'}">${l.last.ok?'✓':'✗'}</span> ${l.last.at} <span class="dim">· ${l.last.detail}</span>`;
+const expiredBanner = () => S.tokenExpired ? `<div class="banner">Plex sign-in expired, so Refreshes are paused. <a onclick="signIn()">Sign in with Plex again</a></div>` : '';
+function mixEditor(n, k) {
+  const l = S.listeners[n], m = l.mixes[k], def = MIXES.find(x => x.key === k);
+  return `<div class="mix"><div class="row"><label class="grow"><input type="checkbox" ${m.on?'checked':''} onchange="toggleMix('${n}','${k}')"> <b>${def.name}</b></label>
+    <select onchange="setCadence('${n}','${k}',this.value)" ${m.on?'':'disabled'}>${['daily','weekly'].map(c=>`<option ${c===m.cadence?'selected':''}>${c}</option>`).join('')}</select></div>
+    ${m.on ? `<div class="settings">${Object.entries(m.settings).map(([s,v]) => `<label class="dim">${s} <input type="number" value="${v}" onchange="setSetting('${n}','${k}','${s}',this.value)"></label>`).join('')}</div>` : ''}</div>`;
+}
+function signInPage(note) {
+  return `<div class="wrap" style="max-width:420px;margin-top:10vh"><div class="panel"><h2>ampanion</h2>
+    <p class="dim">${note || 'Only the Plex server owner can sign in.'}</p><button class="primary" onclick="signIn()">Sign in with Plex</button></div></div>`;
+}
+function serverPicker(after) {
+  return `<p class="dim">Servers you own on this Plex account:</p>
+    ${['Basement NAS (192.168.1.20:32400)','Old laptop (192.168.1.44:32400)'].map(s => `<div class="row" style="margin-bottom:6px"><button onclick="S.server='${s}';${after}">${s}</button></div>`).join('')}
+    <p class="dim">Not listed? Enter URL: <input placeholder="http://192.168.1.20:32400"></p>`;
+}
+function tautulliForm(after) {
+  return `<p class="dim">Optional. Adds Skips to Listening history.</p>
+    <div class="row"><input placeholder="http://192.168.1.20:8181" value="${S.tautulli.url}" onchange="S.tautulli.url=this.value">
+    <input placeholder="API key" value="${S.tautulli.key}" onchange="S.tautulli.key=this.value">
+    <button onclick="S.tautulli.ok=!!S.tautulli.url;render()">Test</button> ${S.tautulli.ok?'<span class="ok">connected</span>':''}</div>
+    ${after ? `<p><button class="primary" onclick="${after}">Continue</button> <a onclick="${after}">Skip</a></p>` : ''}`;
+}
+function settingsBody() {
+  return `<h3>Plex</h3><p>Server: <b>${S.server}</b> <a onclick="S.server=null;go('settings')">change</a><br>
+    <span class="dim">Signed in as derusto (owner).</span> <a onclick="S.tokenExpired=true;render()">[sim: token expires]</a></p>
+    ${S.server ? '' : serverPicker("go('settings')")}
+    <h3>Tautulli</h3>${tautulliForm()}
+    <h3>Schedule</h3><p class="dim">Nightly Refresh at 04:00 (container TZ). Listeners are refreshed one after another.</p>`;
+}
+
+// ---------- Variant A: linear setup wizard, then Listener list → Listener page ----------
+function variantA() {
+  if (!S.signedIn) return signInPage();
+  if (!S.server || S.setupStep < 3 && !Object.keys(S.listeners).length) {
+    const step = S.server ? Math.max(S.setupStep, 1) : 0;
+    const names = ['Server','Tautulli','Listeners'];
+    return `<div class="wrap" style="max-width:640px"><h1>Set up ampanion</h1>
+      <div class="steps">${names.map((n,i)=>`<span class="${i===step?'on':''}">${i+1}. ${n}</span>`).join('')}</div><div class="panel">
+      ${step===0 ? `<h3>Choose your Plex server</h3>${serverPicker("S.setupStep=1;render()")}` : ''}
+      ${step===1 ? `<h3>Connect Tautulli</h3>${tautulliForm("S.setupStep=2;render()")}` : ''}
+      ${step===2 ? `<h3>Pick Listeners</h3><p class="dim">Each gets all five Mixes, tunable later.</p>
+        ${PLEX_USERS.map(u=>`<label style="display:block"><input type="checkbox" id="pick-${u}"> ${u}</label>`).join('')}
+        <p><button class="primary" onclick="PLEX_USERS.filter(u=>document.getElementById('pick-'+u).checked).forEach(u=>S.listeners[u]=newListener(u));S.setupStep=3;refresh(Object.keys(S.listeners))">Finish and refresh now</button></p>` : ''}
+      </div></div>`;
+  }
+  const top = `${expiredBanner()}<div class="top"><span class="brand">ampanion</span><a onclick="go('home')">Listeners</a><a onclick="go('settings')">Settings</a><span class="grow"></span><span class="dim">derusto</span></div>`;
+  if (S.page === 'settings') return top + `<div class="wrap"><h1>Settings</h1><div class="panel">${settingsBody()}</div></div>`;
+  if (S.page === 'listener') {
+    const n = S.listener, l = S.listeners[n];
+    return top + `<div class="wrap"><a onclick="go('home')">← Listeners</a><div class="row"><h1 class="grow">${n}</h1><button class="primary" onclick="refresh(['${n}'])">Refresh now</button></div>
+      <div class="panel">Last Refresh: ${status(l)}</div><h3>Mixes</h3>${MIXES.map(m=>mixEditor(n,m.key)).join('')}
+      <h3>Refresh history</h3><table>${l.log.map(e=>`<tr><td>${e.at}</td><td class="${e.ok?'ok':'bad'}">${e.ok?'ok':'failed'}</td><td class="dim">${e.detail}</td></tr>`).join('')}</table></div>`;
+  }
+  return top + `<div class="wrap"><div class="row"><h1 class="grow">Listeners</h1><button class="primary" onclick="refresh(Object.keys(S.listeners))">Refresh all now</button></div>
+    <table><tr><th>Listener</th><th>Mixes</th><th>Last Refresh</th><th></th></tr>
+    ${Object.values(S.listeners).map(l=>`<tr><td><a onclick="go('listener',{listener:'${l.name}'})">${l.name}</a></td>
+      <td class="dim">${MIXES.filter(m=>l.mixes[m.key].on).length} of 5</td><td>${status(l)}</td><td><button onclick="refresh(['${l.name}'])">Refresh</button></td></tr>`).join('')}</table>
+    <p class="dim">Add a Listener: ${PLEX_USERS.filter(u=>!S.listeners[u]).map(u=>`<a onclick="toggleListener('${u}')">+ ${u}</a>`).join(' · ') || 'all picked'}</p></div>`;
+}
+
+// ---------- Variant B: Listener sidebar app; setup is a checklist on Home, not a wizard ----------
+function variantB() {
+  if (!S.signedIn) return signInPage();
+  const side = `<div class="side"><div class="item ${S.page==='home'?'on':''}" onclick="go('home')">🏠 Home</div>
+    <p class="dim" style="margin:12px 8px 4px">LISTENERS</p>
+    ${PLEX_USERS.map(u=>`<div class="item ${S.page==='listener'&&S.listener===u?'on':''}" onclick="${S.listeners[u]?`go('listener',{listener:'${u}',tab:'mixes'})`:`toggleListener('${u}')`}">
+      ${S.listeners[u] ? (S.listeners[u].refreshing?'⏳':S.listeners[u].last?.ok===false?'⚠️':'🎧') : '<span class="dim">+</span>'} <span class="${S.listeners[u]?'':'dim'}">${u}</span></div>`).join('')}
+    <div class="item ${S.page==='settings'?'on':''}" style="margin-top:24px" onclick="go('settings')">⚙️ Settings</div></div>`;
+  let main;
+  if (S.page === 'settings') main = `<h1>Settings</h1>${settingsBody()}`;
+  else if (S.page === 'listener' && S.listeners[S.listener]) {
+    const n = S.listener, l = S.listeners[n];
+    main = `<div class="row"><h1 class="grow">${n}</h1><button class="primary" onclick="refresh(['${n}'])">Refresh now</button><button onclick="toggleListener('${n}');go('home')">Turn off</button></div>
+      <div class="tabs">${['mixes','playlists','history'].map(t=>`<a class="${S.tab===t?'on':''}" onclick="S.tab='${t}';render()">${t[0].toUpperCase()+t.slice(1)}</a>`).join('')}</div>
+      ${S.tab==='mixes' ? MIXES.map(m=>mixEditor(n,m.key)).join('') : ''}
+      ${S.tab==='playlists' ? `<p class="dim">What's on Plex for ${n} right now:</p><table>${playlistNames(l).map(p=>`<tr><td>${p}</td><td class="dim">refreshed ${l.last?.at||'never'}</td></tr>`).join('')}</table>` : ''}
+      ${S.tab==='history' ? `<table>${l.log.map(e=>`<tr><td>${e.at}</td><td class="${e.ok?'ok':'bad'}">${e.ok?'ok':'failed'}</td><td class="dim">${e.detail}</td></tr>`).join('')}</table>` : ''}`;
+  } else {
+    const checklist = [[!!S.server,'Choose your Plex server',"go('settings')"],[S.tautulli.ok,'Connect Tautulli (optional)',"go('settings')"],[Object.keys(S.listeners).length>0,'Pick at least one Listener (click + in the sidebar)','']];
+    main = `<h1>Home</h1>${checklist.every(c=>c[0]) || (S.server && Object.keys(S.listeners).length) ? '' : `<div class="panel"><h3>Getting started</h3>${checklist.map(([d,t,a])=>`<div>${d?'✅':'⬜'} ${a&&!d?`<a onclick="${a}">${t}</a>`:t}</div>`).join('')}</div>`}
+      <div class="panel"><div class="row"><span class="grow">Next nightly Refresh: <b>04:00</b></span><button class="primary" onclick="refresh(Object.keys(S.listeners))" ${Object.keys(S.listeners).length?'':'disabled'}>Refresh all now</button></div></div>
+      <h3>Recent Refreshes</h3><table>${Object.values(S.listeners).flatMap(l=>l.log.map(e=>({...e,n:l.name}))).map(e=>`<tr><td>${e.at}</td><td>${e.n}</td><td class="${e.ok?'ok':'bad'}">${e.ok?'ok':'failed'}</td><td class="dim">${e.detail}</td></tr>`).join('') || '<tr><td class="dim">none yet</td></tr>'}</table>`;
+  }
+  return expiredBanner() + `<div class="row" style="align-items:stretch;gap:0">${side}<div class="wrap grow" style="margin:0">${main}</div></div>`;
+}
+
+// ---------- Variant C: one page, a Listeners × Mixes matrix; cell opens a drawer ----------
+function variantC() {
+  if (!S.signedIn) return signInPage('Sign in with the Plex account that owns the server.');
+  const names = Object.keys(S.listeners);
+  const setup = !S.server ? `<div class="panel"><h3>Connect a Plex server</h3>${serverPicker("render()")}</div>` : '';
+  const drawer = S.drawer ? (() => { const [n,k] = S.drawer;
+    return `<div class="drawer"><div class="row"><h3 class="grow">${n}</h3><a onclick="S.drawer=null;render()">✕</a></div>
+      ${k ? mixEditor(n,k) : `<p>Last Refresh: ${status(S.listeners[n])}</p><button class="primary" onclick="refresh(['${n}'])">Refresh ${n} now</button>
+      <h4>History</h4>${S.listeners[n].log.map(e=>`<div class="dim">${e.at}: <span class="${e.ok?'ok':'bad'}">${e.ok?'ok':'failed'}</span> ${e.detail}</div>`).join('')}
+      <p><button onclick="toggleListener('${n}');S.drawer=null;render()">Stop making Playlists for ${n}</button></p>`}</div>`; })() : '';
+  return expiredBanner() + `<div class="top"><span class="brand">ampanion</span><span class="dim">${S.server||'no server'}</span><span class="grow"></span>
+      <a onclick="S.drawer=null;S.page=S.page==='settings'?'home':'settings';render()">⚙️ ${S.page==='settings'?'Close settings':'Settings'}</a></div>
+    <div class="wrap" style="max-width:1100px">${setup}
+    ${S.page==='settings' ? `<div class="panel">${settingsBody()}</div>` : ''}
+    ${S.server ? `<div class="row"><h2 class="grow">Mixes</h2><button class="primary" onclick="refresh(Object.keys(S.listeners))" ${names.length?'':'disabled'}>Refresh all now</button></div>
+    <table><tr><th>Listener</th>${MIXES.map(m=>`<th>${m.name}</th>`).join('')}<th>Last Refresh</th></tr>
+    ${PLEX_USERS.map(u => S.listeners[u]
+      ? `<tr><td><a onclick="S.drawer=['${u}',null];render()">${u}</a></td>${MIXES.map(m=>{const x=S.listeners[u].mixes[m.key];
+          return `<td class="cell" onclick="S.drawer=['${u}','${m.key}'];render()">${x.on?`✅<div class="dim">${x.cadence}</div>`:'<span class="dim">off</span>'}</td>`}).join('')}<td>${status(S.listeners[u])}</td></tr>`
+      : `<tr><td class="dim">${u}</td><td colspan="${MIXES.length+1}"><a onclick="toggleListener('${u}')">+ make Playlists for ${u}</a></td></tr>`).join('')}</table>
+    <p class="dim">Click a cell to tune that Mix; click a name for its Refreshes.</p>` : ''}</div>${drawer}`;
+}
+
+// ---------- switcher ----------
+const VARIANTS = { A:'Wizard + Listener list', B:'Listener sidebar + checklist', C:'Listener × Mix matrix' };
+function cycle(d) { const k = Object.keys(VARIANTS); S.variant = k[(k.indexOf(S.variant)+d+k.length)%k.length];
+  const p = new URLSearchParams(location.search); p.set('variant', S.variant); try { history.replaceState(null,'','?'+p); } catch {} go('home'); }
+addEventListener('keydown', e => { if (e.target.closest('input,textarea,select,[contenteditable]')) return;
+  if (e.key==='ArrowLeft') cycle(-1); if (e.key==='ArrowRight') cycle(1); });
+function renderState() { document.getElementById('state').textContent = JSON.stringify({ page:S.page, listener:S.listener, server:S.server,
+  listeners:Object.fromEntries(Object.entries(S.listeners).map(([n,l])=>[n,Object.entries(l.mixes).filter(([,m])=>m.on).map(([k,m])=>k+':'+m.cadence)]))}, null, 1); }
+function render() {
+  document.getElementById('app').innerHTML = ({ A:variantA, B:variantB, C:variantC }[S.variant] || variantA)();
+  document.getElementById('vlabel').textContent = `${S.variant} (${VARIANTS[S.variant]})`; renderState();
+}
+render();
+</script>
+</body>
+</html>
