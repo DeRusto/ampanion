@@ -52,5 +52,12 @@ def add_server_routes(app: FastAPI, *, store: Store, gateway: Gateway):
         url = url.strip()
         if url and (urlsplit(url).scheme not in ("http", "https") or not urlsplit(url).netloc):
             raise HTTPException(400, "The Plex server URL must start with http:// or https://")
+        if url:  # another server there would get this one's Playlist writes
+            try:
+                answers = gateway.server_identity(url, store.owner_token) == store.server_machine_id
+            except GatewayError:
+                answers = False
+            if not answers:
+                raise HTTPException(400, f"{store.server_name or 'The chosen Plex server'} doesn't answer at that URL")
         store.set_server_manual_url(url or None)
         return RedirectResponse("/settings", 303)
