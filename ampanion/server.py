@@ -3,7 +3,7 @@
 The choice is made once. v1 has no way to switch server in place (a later Reset starts over).
 """
 
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import FastAPI, Form, HTTPException
 from fastapi.responses import RedirectResponse
@@ -17,12 +17,17 @@ def owned_servers(gateway: Gateway, token: str) -> list[PlexResource]:
 
 
 def reach(gateway: Gateway, server: PlexResource, token: str) -> str | None:
-    """The first of the server's connections that answers as this server: local ones, then remote, never relay."""
-    candidates = [c for c in server.connections if not c.relay]
-    for connection in sorted(candidates, key=lambda c: not c.local):  # stable: plex.tv's order within each group
+    """The first of the server's connections that answers as this server: local ones, then local https ones over
+    plain http, then remote, never relay. Each group keeps plex.tv's order."""
+    local = [c.uri for c in server.connections if c.local and not c.relay]
+    remote = [c.uri for c in server.connections if not c.local and not c.relay]
+    # Plex can serve its plex.direct certificate without the intermediate, which requests can't verify; on the LAN
+    # the server still answers plain http unless its Secure connections setting is Required.
+    insecure = [urlunsplit(urlsplit(uri)._replace(scheme="http")) for uri in local if urlsplit(uri).scheme == "https"]
+    for uri in local + insecure + remote:
         try:
-            if gateway.server_identity(connection.uri, token) == server.client_identifier:
-                return connection.uri
+            if gateway.server_identity(uri, token) == server.client_identifier:
+                return uri
         except GatewayError:
             continue
     return None
