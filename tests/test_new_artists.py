@@ -154,3 +154,16 @@ def test_length_and_tracks_per_artist_are_editable_on_the_mixes_tab(client, gate
     artists = [artist_of(k) for k in new_artists(gateway).items]
     assert len(artists) == 12 and max(artists.count(a) for a in artists) == 2
     assert "New Artists: 12 tracks" in client.get("/listeners/8?tab=history").text
+
+
+def test_only_tracks_in_music_libraries_shared_with_the_listener_are_picked(client, gateway, clock, pal):
+    for i in range(10):
+        artist_with(gateway, clock, f"Shared{i}")
+    for key in [k for i in range(10) for k in artist_with(gateway, clock, f"Private{i}")]:
+        gateway.add_track(key, artist=artist_of(key), album=f"{artist_of(key)} LP", section="owner-only")
+    gateway.hide_section(PAL, "owner-only")  # the Owner's share with Pal leaves this library out
+
+    refresh(client)
+
+    items = new_artists(gateway).items
+    assert len(items) == 30 and all(k.startswith("Shared") for k in items)

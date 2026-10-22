@@ -57,6 +57,7 @@ class FakeGateway:
         self.plex_tv_answers.set()
         self.killed_reading_history = False  # ampanion's process dies (e.g. the container stops) mid-Refresh
         self.while_reading_history = lambda: None  # what else happens (e.g. the Owner clicks) while history is read
+        self._hidden_sections: dict[str, set[str]] = defaultdict(set)  # token -> music libraries its share leaves out
         self.rejected_tokens: set[str] = set()  # tokens the Plex server answers 401 to, e.g. a revoked share token
         # Tautulli: where it answers, its API key and the Plex server it watches; its track history by plex.tv user id.
         self._tautulli: dict[str, tuple[str, str]] = {}
@@ -144,6 +145,7 @@ class FakeGateway:
                 "album": album,
                 "album_key": f"album-{album}",
                 "artist_key": f"artist-{artist}",
+                "section": "music",
             }
             | fields
         )
@@ -153,6 +155,10 @@ class FakeGateway:
     def rekey_track(self, old: str, new: str) -> None:
         """Plex gives the track a new rating key (e.g. after a rescan), keeping its guid."""
         self._tracks[new] = replace(self._tracks.pop(old), rating_key=new)
+
+    def hide_section(self, token: str, section: str) -> None:
+        """The share behind token doesn't include the music library `section` (tracks are in "music" by default)."""
+        self._hidden_sections[token].add(section)
 
     def remove_track(self, rating_key: str) -> None:
         del self._tracks[rating_key]
@@ -259,6 +265,10 @@ class FakeGateway:
     def library_tracks(self, url: str, token: str) -> list[LibraryTrack]:
         self._server_token(token)
         return list(self._tracks.values())
+
+    def music_sections(self, url: str, token: str) -> list[str]:
+        self._server_token(token)
+        return sorted({t.section for t in self._tracks.values()} - self._hidden_sections[token])
 
     def ratings(self, url: str, token: str) -> dict[str, float]:
         self._server_token(token)

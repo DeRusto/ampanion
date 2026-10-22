@@ -109,6 +109,9 @@ def refresh_listener(
 ) -> list[dict]:
     url, account_id = store.server_url, listener.account_id
     token = listener_token(store, gateway, account_id)
+    # shortcut: filters by whole music library only, not a share's label (track-level) restrictions; upgrade when a Listener's share uses them
+    sections = step("Couldn't read the Listener's music libraries from Plex", gateway.music_sections, url, token)
+    library = library.in_sections(set(sections))
     history_account = OWNER_HISTORY_ACCOUNT if account_id == store.owner_account_id else account_id
     try:
         history.sync(

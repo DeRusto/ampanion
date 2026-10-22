@@ -97,6 +97,7 @@ class LibraryTrack:
     album_genres: tuple[str, ...] = ()
     artist_genres: tuple[str, ...] = ()
     popularity: int | None = None  # Plex's ratingCount (Last.fm scrobbles), when known
+    section: str = ""  # the key of the music library it is in
 
     @property
     def genres(self) -> tuple[str, ...]:
@@ -161,6 +162,10 @@ class Gateway(Protocol):
 
     def library_tracks(self, url: str, token: str) -> list[LibraryTrack]:
         """Every track in the server's music libraries."""
+        ...
+
+    def music_sections(self, url: str, token: str) -> list[str]:
+        """The keys of the music libraries the token can see: all of them for the Owner, the shared ones for a Listener."""
         ...
 
     def ratings(self, url: str, token: str) -> dict[str, float]:
@@ -324,7 +329,7 @@ class PlexGateway:
             if len(batch) < size or len(items) >= body.get("totalSize", len(items) + 1):
                 return items
 
-    def _music_sections(self, url: str, token: str) -> list[str]:
+    def music_sections(self, url: str, token: str) -> list[str]:
         sections = self._pms("GET", url, "/library/sections", token).get("Directory", [])
         return [d["key"] for d in sections if d.get("type") == "artist"]
 
@@ -349,7 +354,7 @@ class PlexGateway:
     def library_tracks(self, url: str, token: str) -> list[LibraryTrack]:
         # shortcut: assumes bulk listings carry Genre tags and ratingCount, unverified until tests/test_live_gateway.py runs against a live server
         tracks = []
-        for section in self._music_sections(url, token):
+        for section in self.music_sections(url, token):
             path = f"/library/sections/{section}/all"
             artists = {str(a["ratingKey"]): _tags(a) for a in self._pages(url, path, token, {"type": 8})}
             albums = {str(a["ratingKey"]): _tags(a) for a in self._pages(url, path, token, {"type": 9})}
@@ -369,13 +374,14 @@ class PlexGateway:
                         album_genres=albums.get(album_key, ()),
                         artist_genres=artists.get(artist_key, ()),
                         popularity=t.get("ratingCount"),
+                        section=section,
                     )
                 )
         return tracks
 
     def ratings(self, url: str, token: str) -> dict[str, float]:
         ratings = {}
-        for section in self._music_sections(url, token):
+        for section in self.music_sections(url, token):
             for libtype in (8, 9, 10):
                 params = {"type": libtype, "userRating>": 0}  # sent as "userRating>>=0": rated items only
                 for item in self._pages(url, f"/library/sections/{section}/all", token, params):

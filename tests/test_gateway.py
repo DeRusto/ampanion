@@ -247,6 +247,7 @@ def test_library_tracks_carry_their_album_and_artist_genres():
 
     assert (a.rating_key, a.album_key, a.artist_key, a.genres, a.popularity) == ("30", "20", "10", ("Indie",), 5000)
     assert (b.artist, b.album_artist, b.genres, b.popularity) == ("Guest", "Band", ("Rock",), None)
+    assert a.section == "3" and real.music_sections(URL, "pal-token") == ["3"]
 
 
 def test_ratings_are_the_rated_tracks_albums_and_artists_of_the_token_account():

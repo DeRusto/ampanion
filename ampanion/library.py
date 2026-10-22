@@ -17,6 +17,11 @@ class LibraryIndex:
         tracks = {t.rating_key: t for t in gateway.library_tracks(url, token)}
         return cls(tracks=tracks, by_guid={t.guid: t.rating_key for t in tracks.values() if t.guid})
 
+    def in_sections(self, sections: set[str]) -> "LibraryIndex":
+        """Only the tracks in these music libraries."""
+        tracks = {k: t for k, t in self.tracks.items() if t.section in sections}
+        return LibraryIndex(tracks=tracks, by_guid={g: k for g, k in self.by_guid.items() if k in tracks})
+
 
 @dataclass(frozen=True)
 class Ratings:
