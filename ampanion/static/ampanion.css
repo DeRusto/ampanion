@@ -1,0 +1,40 @@
+/* Plex colours (dark UI, Plex amber accent); wordmark colours from docs/brand/ampanion-social-preview.png. */
+:root {
+  --bg: #16181d;
+  --panel: #1f232b;
+  --line: #2e3440;
+  --text: #e6e6e6;
+  --dim: #9aa3b2;
+  --accent: #e5a00d;
+  --ok: #4caf50;
+  --bad: #e05252;
+  --brand-tan: #eec48c;
+  --brand-amp: #b5701a;
+  --brand-anion: #2a2420;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; display: flex; min-height: 100vh; font: 14px/1.45 system-ui, sans-serif; background: var(--bg); color: var(--text); }
+a { color: var(--accent); }
+h1, h2, h3 { margin: .2em 0 .6em; }
+
+.sidebar { width: 220px; flex-shrink: 0; border-right: 1px solid var(--line); padding: 12px; display: flex; flex-direction: column; gap: 4px; }
+.sidebar .brand { display: block; background: var(--brand-tan); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; text-decoration: none; }
+.sidebar .wordmark { display: block; font-size: 24px; font-weight: 700; letter-spacing: -.5px; }
+.sidebar .amp { color: var(--brand-amp); }
+.sidebar .anion { color: var(--brand-anion); }
+.sidebar .tagline { display: block; font-size: 11px; color: var(--brand-anion); opacity: .8; }
+.sidebar .item { padding: 8px; border-radius: 6px; color: var(--text); text-decoration: none; }
+.sidebar .item:hover, .sidebar .item.on { background: var(--panel); }
+.sidebar .item.on { box-shadow: inset 3px 0 var(--accent); }
+.sidebar .settings { margin-top: 24px; }
+
+main { flex: 1; max-width: 960px; padding: 16px 24px; }
+
+@media (max-width: 640px) {
+  body { flex-direction: column; }
+  .sidebar { width: auto; border-right: none; border-bottom: 1px solid var(--line); flex-direction: row; flex-wrap: wrap; align-items: center; }
+  .sidebar .brand { width: 100%; }
+  .sidebar .settings { margin-top: 0; }
+  main { padding: 16px; }
+}
