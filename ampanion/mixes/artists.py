@@ -36,10 +36,20 @@ def top_artists(mix: MixInput) -> list[str]:
     return (qualifying if len(qualifying) >= TOP_ARTISTS else ranked)[:TOP_ARTISTS]
 
 
-def pick_capped(tracks: list[str], artist_of: Callable[[str], str], length: int, per_artist: int, rng: Random) -> list[str]:
-    """A random pick of up to `length` tracks, at most `per_artist` by any one artist."""
-    pool, taken, picked = list(tracks), Counter(), []
-    rng.shuffle(pool)
+def pick_capped(
+    tracks: list[str], artist_of: Callable[[str], str], length: int, per_artist: int, rng: Random,
+    weight: Callable[[str], float] | None = None, taken: Counter | None = None,
+) -> list[str]:
+    """A random pick of up to `length` tracks, at most `per_artist` by any one artist.
+
+    `weight` (> 0) makes heavier tracks likelier; `taken` carries per-artist counts across picks and is updated.
+    """
+    pool, picked = list(tracks), []
+    taken = Counter() if taken is None else taken
+    if weight:  # exponential race: sorting by Exp(weight) draws is a weighted pick without replacement
+        pool.sort(key=lambda t: rng.expovariate(weight(t)))
+    else:
+        rng.shuffle(pool)
     for t in pool:
         if len(picked) == length:
             break
