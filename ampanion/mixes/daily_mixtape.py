@@ -2,14 +2,14 @@
 
 from collections import Counter
 
-from ampanion.mixes.artists import VARIOUS, pick_capped, spread_shuffle
+from ampanion.mixes.artists import VARIOUS, pick_capped
 from ampanion.mixes.rule import Mix, MixInput, Setting
 
 RECENCY_DAYS = 30  # a familiar track last played this many days ago is half as likely as one played just now
 
 
 def rule(mix: MixInput) -> dict[str | None, list[str]]:
-    """Familiar: 2+ Plays, weighted toward recent Plays. Fresh: 0 Plays by a played artist. Split by fresh share."""
+    """Familiar: 2+ Plays, weighted toward recent Plays. Fresh: 0 Plays by a played artist. Split by fresh share, interleaved."""
     plays, latest = Counter(), {}
     for p in mix.plays:
         plays[p.rating_key] += 1
@@ -35,7 +35,27 @@ def rule(mix: MixInput) -> dict[str | None, list[str]]:
     picked += pick(familiar, length - len(picked), weight=recency)  # also fills a short fresh side
     chosen = set(picked)
     picked += pick([k for k in fresh if k not in chosen], length - len(picked))  # fills a short familiar side
-    return {None: spread_shuffle(picked, artist_of, mix.rng)}
+    return {None: interleave(picked, set(fresh), artist_of, mix.rng)}
+
+
+def interleave(picked: list[str], fresh: set[str], artist_of, rng) -> list[str]:
+    """Fresh tracks spaced evenly among familiar ones, then artists kept apart where the slots allow it."""
+    sides = {True: [k for k in picked if k in fresh], False: [k for k in picked if k not in fresh]}
+    for side in sides.values():
+        rng.shuffle(side)  # so ties below fall at random
+    n, f = len(picked), len(sides[True])
+    left = Counter(map(artist_of, picked))
+    ordered, last = [], None
+    for i in range(n):
+        side = sides[(i + 1) * f // n > i * f // n]  # Bresenham: the f fresh slots spread over n
+        options = [k for k in side if artist_of(k) != last] or side
+        # the artist with most tracks left goes first, so few are left to bunch up at the end
+        track = max(options, key=lambda k: left[artist_of(k)])
+        side.remove(track)
+        last = artist_of(track)
+        left[last] -= 1
+        ordered.append(track)
+    return ordered
 
 
 DAILY_MIXTAPE = Mix(

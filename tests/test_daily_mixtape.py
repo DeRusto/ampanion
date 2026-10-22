@@ -63,7 +63,8 @@ def test_daily_mixtape_blends_familiar_and_fresh_tracks_capped_per_artist_and_sp
         assert not {a for a, k in zip(artists, kinds) if k == "fresh"} & {"Unplayed", "Various Artists"}
         assert max(artists.count(a) for a in artists) <= 2
         assert all(a != b for a, b in zip(artists, artists[1:]))
-        assert {"familiar", "fresh"} <= set(kinds[:25]) and {"familiar", "fresh"} <= set(kinds[25:])  # interleaved
+        runs = "".join(k[1] for k in kinds)  # "a" familiar, "r" fresh: evenly interleaved, 3 familiar to 2 fresh
+        assert "rr" not in runs and "aaa" not in runs
         assert not set(items) & set(previous)  # nothing from the previous Daily Mixtape
         previous = items
     assert mixtape(gateway).summary == "Made by ampanion: Daily Mixtape. Refreshed daily; edits are replaced."
