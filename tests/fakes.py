@@ -163,6 +163,10 @@ class FakeGateway:
     def playlists_of(self, token: str) -> list[FakePlaylist]:
         return list(self._playlists[token])
 
+    def rename_playlist(self, token: str, playlist_id: str, title: str) -> None:
+        """The Playlist's owner renames it in Plex."""
+        self._playlist(token, playlist_id).title = title
+
     def _server_token(self, token: str) -> None:
         """Plex server calls take an account token or a shared server token; anything else is refused."""
         shared = {t for tokens in self._shared_tokens.values() for t in tokens.values()}
@@ -231,6 +235,14 @@ class FakeGateway:
         except NotFound:
             return None
         return PlexPlaylist(p.id, p.title, p.summary)
+
+    def playlists(self, url: str, token: str) -> list[PlexPlaylist]:
+        self._server_token(token)
+        return [PlexPlaylist(p.id, p.title, p.summary) for p in self._playlists[token]]
+
+    def delete_playlist(self, url: str, token: str, playlist_id: str) -> None:
+        self._server_token(token)
+        self._playlists[token].remove(self._playlist(token, playlist_id))
 
     def create_playlist(self, url: str, token: str, machine_id: str, title: str, rating_keys: list[str]) -> str:
         self._server_token(token)

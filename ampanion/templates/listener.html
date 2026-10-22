@@ -26,7 +26,18 @@
     <p class="status-line">{% for p in playlists %}{% if p.genre %}{{ p.genre }}: {% endif %}{{ p.status }}{% if not loop.last %}; {% endif %}{% else %}Not refreshed yet{% endfor %}</p>
   </form>
   {% endfor %}
-  {% elif tab == 'playlists' %}<p>ampanion hasn't made any Playlists for {{ listener.name }} yet.</p>
+  {% elif tab == 'playlists' %}
+  {% if playlists_error %}<p class="error">{{ playlists_error }}</p>
+  {% elif playlists %}
+  <table class="playlists">
+    <thead><tr><th>Playlist</th><th>Tracks</th><th>Last refresh (UTC)</th></tr></thead>
+    <tbody>
+    {% for title, p in playlists %}
+    <tr><td>{{ title }}</td><td>{{ p.tracks | length }}</td><td>{{ p.refreshed_at.strftime('%Y-%m-%d %H:%M') }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p>ampanion hasn't made any Playlists for {{ listener.name }} yet.</p>{% endif %}
   {% else %}{% include "refreshes.html" %}{% endif %}
 </section>
 {% endblock %}

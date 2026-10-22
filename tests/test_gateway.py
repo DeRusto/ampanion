@@ -8,6 +8,7 @@ import pytest
 from ampanion.gateway import (
     GatewayError,
     HistoryEntry,
+    NotFound,
     PlexAccount,
     PlexConnection,
     PlexGateway,
@@ -296,3 +297,30 @@ def test_playlists_are_created_read_cleared_filled_and_summarised_with_the_token
     assert fake.playlist(URL, "owner-token", playlist_id) == PlexPlaylist(playlist_id, "On Repeat", "s")
     assert fake.playlists_of("owner-token")[0].items == ["3"]
     assert fake.playlist(URL, "owner-token", "nope") is None
+
+
+def test_the_token_accounts_audio_playlists_are_listed_and_deleted():
+    def routes(request):
+        match request.method, request.url.path:
+            case "GET", "/playlists":
+                return 200, {"Metadata": [{"ratingKey": 77, "title": "On Repeat", "summary": "s"}]}
+            case "DELETE", "/playlists/78":
+                return 404, None
+        return 200, None
+
+    real, requests = plex_server(routes)
+
+    assert real.playlists(URL, "pal-token") == [PlexPlaylist("77", "On Repeat", "s")]
+    assert requests[-1].url.params["playlistType"] == "audio"
+    real.delete_playlist(URL, "pal-token", "77")
+    assert (requests[-1].method, requests[-1].url.path) == ("DELETE", "/playlists/77")
+    with pytest.raises(NotFound):
+        real.delete_playlist(URL, "pal-token", "78")
+
+    fake = fake_with_owner()
+    playlist_id = fake.create_playlist(URL, "owner-token", "m1", "On Repeat", ["1"])
+    assert fake.playlists(URL, "owner-token") == [PlexPlaylist(playlist_id, "On Repeat", "")]
+    fake.delete_playlist(URL, "owner-token", playlist_id)
+    assert fake.playlists(URL, "owner-token") == []
+    with pytest.raises(NotFound):
+        fake.delete_playlist(URL, "owner-token", playlist_id)

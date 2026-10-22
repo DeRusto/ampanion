@@ -3,7 +3,7 @@
 from dataclasses import replace
 from datetime import datetime
 
-from ampanion.gateway import Gateway
+from ampanion.gateway import Gateway, NotFound
 from ampanion.mixes import Mix, mix_cadence
 from ampanion.store import ManagedPlaylist, Store
 
@@ -22,8 +22,13 @@ def playlist_title(mix: Mix, genre: str | None) -> str:
     return mix.title if genre is None else f"{genre} Mix"
 
 
+def marker_name(title: str) -> str:
+    """The part of the summary marker naming the Mix (and genre): what takeover matches, whatever the cadence."""
+    return f"Made by ampanion: {title}."
+
+
 def summary_marker(title: str, cadence: str) -> str:
-    return f"Made by ampanion: {title}. Refreshed {cadence}; edits are replaced."
+    return f"{marker_name(title)} Refreshed {cadence}; edits are replaced."
 
 
 def publish(
@@ -41,18 +46,39 @@ def publish(
         store.save_managed_playlist(account_id, kept)
         return status
     title = playlist_title(mix, genre)
-    playlist_id = managed.playlist_id if managed else None
-    if playlist_id and gateway.playlist(url, token, playlist_id) is not None:
+    marker, name = summary_marker(title, mix_cadence(store, mix)), marker_name(title)
+    stored_id = managed.playlist_id if managed else None
+    if stored_id is None:  # e.g. /config was lost: take over the Listener's Playlist still carrying this marker
+        playlist_id = next((p.id for p in gateway.playlists(url, token) if p.summary.startswith(name + " ")), None)
+    else:
+        playlist_id = stored_id if gateway.playlist(url, token, stored_id) is not None else None
+    if playlist_id:
         gateway.clear_playlist(url, token, playlist_id)
         rest = tracks
     else:
-        # shortcut: no takeover by marker or "recreated" note yet, the Playlist lifecycle ticket (#29) adds them
+        if stored_id:
+            status += ", recreated (was deleted in Plex)"
         playlist_id = gateway.create_playlist(url, token, machine_id, title, tracks[:CHUNK])
         # Remember the id at once, so a failure below doesn't lead to a duplicate Playlist next time.
         store.save_managed_playlist(account_id, ManagedPlaylist(mix.key, genre, playlist_id, [], status, now))
         rest = tracks[CHUNK:]
     for i in range(0, len(rest), CHUNK):
         gateway.add_to_playlist(url, token, machine_id, playlist_id, rest[i : i + CHUNK])
-    gateway.set_playlist_summary(url, token, playlist_id, summary_marker(title, mix_cadence(store, mix)))
+    gateway.set_playlist_summary(url, token, playlist_id, marker)
     store.save_managed_playlist(account_id, ManagedPlaylist(mix.key, genre, playlist_id, tracks, status, now))
     return status
+
+
+def on_plex(store: Store, account_id: int, mix_key: str) -> list[ManagedPlaylist]:
+    """The Mix's Playlists ampanion has published for the Listener."""
+    return [p for p in store.managed_playlists(account_id, mix_key) if p.playlist_id]
+
+
+def delete_playlists(gateway: Gateway, store: Store, *, url: str, token: str, account_id: int, mix_key: str) -> None:
+    """Delete the Mix's Playlists from the Listener's Plex account, then forget them."""
+    for p in on_plex(store, account_id, mix_key):
+        try:
+            gateway.delete_playlist(url, token, p.playlist_id)
+        except NotFound:
+            pass  # the Listener already deleted it
+    store.forget_managed_playlists(account_id, mix_key)

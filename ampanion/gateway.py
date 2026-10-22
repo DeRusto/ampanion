@@ -157,6 +157,14 @@ class Gateway(Protocol):
         """The token's account's Playlist with this id, or None if it doesn't exist (or isn't theirs)."""
         ...
 
+    def playlists(self, url: str, token: str) -> list[PlexPlaylist]:
+        """The token's account's audio Playlists."""
+        ...
+
+    def delete_playlist(self, url: str, token: str, playlist_id: str) -> None:
+        """Raises NotFound if the token's account has no such Playlist."""
+        ...
+
     def create_playlist(self, url: str, token: str, machine_id: str, title: str, rating_keys: list[str]) -> str:
         """Create a regular audio Playlist holding rating_keys (at least one) in the token's account; returns its id."""
         ...
@@ -172,6 +180,10 @@ class Gateway(Protocol):
 
 def _metadata_uri(machine_id: str, rating_keys: list[str]) -> str:
     return f"server://{machine_id}/com.plexapp.plugins.library/library/metadata/{','.join(rating_keys)}"
+
+
+def _playlist(item: dict) -> PlexPlaylist:
+    return PlexPlaylist(id=str(item["ratingKey"]), title=item.get("title", ""), summary=item.get("summary", ""))
 
 
 def _tags(item: dict) -> tuple[str, ...]:
@@ -355,8 +367,13 @@ class PlexGateway:
             return None
         if not items:
             return None
-        item = items[0]
-        return PlexPlaylist(id=str(item["ratingKey"]), title=item.get("title", ""), summary=item.get("summary", ""))
+        return _playlist(items[0])
+
+    def playlists(self, url: str, token: str) -> list[PlexPlaylist]:
+        return [_playlist(p) for p in self._pms("GET", url, "/playlists", token, {"playlistType": "audio"}).get("Metadata", [])]
+
+    def delete_playlist(self, url: str, token: str, playlist_id: str) -> None:
+        self._pms("DELETE", url, f"/playlists/{quote(playlist_id)}", token)
 
     def create_playlist(self, url: str, token: str, machine_id: str, title: str, rating_keys: list[str]) -> str:
         params = {"uri": _metadata_uri(machine_id, rating_keys), "type": "audio", "title": title, "smart": 0}

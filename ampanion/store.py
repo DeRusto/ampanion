@@ -317,6 +317,10 @@ class Store:
                 (account_id, p.mix, p.genre or "", p.playlist_id, json.dumps(p.tracks), p.status, p.refreshed_at.isoformat()),
             )
 
+    def forget_managed_playlists(self, account_id: int, mix: str) -> None:
+        with self.connect() as db:
+            db.execute("DELETE FROM managed_playlists WHERE account_id = ? AND mix = ?", (account_id, mix))
+
     # --- Refresh records ---
 
     def start_refresh(self, account_id: int | None, started_at: datetime) -> int:
