@@ -62,7 +62,7 @@ class Scheduler:
         self.running = False  # a run has started and not finished (one merely queued reads everything when it starts)
         if store.last_slot is None:  # a fresh install has missed no run
             self.mark_slot_done()
-        self.check_owner_token()  # at startup
+        self._started = False  # the first tick checks the Owner token, on the scheduler's thread, not in startup
 
     @property
     def busy(self) -> bool:
@@ -133,6 +133,9 @@ class Scheduler:
 
     def tick(self) -> None:
         """Queue the nightly run if its slot has come (once, however many were missed), then work through the queue."""
+        if not self._started:
+            self._started = True
+            self.check_owner_token()
         slot = last_slot(self.clock.now(), self.store.run_time, self.tz)
         with self._lock:
             if self.store.last_slot < slot and all(r.slot != slot for r in self._queue):

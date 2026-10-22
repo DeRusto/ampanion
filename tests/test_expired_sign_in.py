@@ -27,6 +27,7 @@ def test_a_dead_token_at_startup_pauses_refreshes_with_a_banner(start_app, clien
     gateway.expire_token("owner-token")
 
     with start_app() as restarted:
+        background(restarted)  # the scheduler's thread checks the Owner token as it starts
         restarted.cookies = client.cookies
         html = restarted.get("/").text  # the Owner's session is still good
         assert "Refreshes are paused" in html and 'href="/signin/plex"' in html and "Sign in again" in html

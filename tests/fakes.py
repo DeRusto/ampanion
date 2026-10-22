@@ -1,6 +1,7 @@
 """In-memory stand-ins for everything outside ampanion. Tests set up the world here, then drive the app."""
 
 import itertools
+import threading
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
@@ -52,6 +53,8 @@ class FakeGateway:
         self._playlists: dict[str, list[FakePlaylist]] = defaultdict(list)  # token -> its account's Playlists
         self.item_batches: dict[str, list[int]] = defaultdict(list)  # token -> size of each create/add call
         self.history_down = False
+        self.plex_tv_answers = threading.Event()  # cleared: plex.tv takes its time over a token check
+        self.plex_tv_answers.set()
         self.killed_reading_history = False  # ampanion's process dies (e.g. the container stops) mid-Refresh
         self.while_reading_history = lambda: None  # what else happens (e.g. the Owner clicks) while history is read
         self.rejected_tokens: set[str] = set()  # tokens the Plex server answers 401 to, e.g. a revoked share token
@@ -210,6 +213,8 @@ class FakeGateway:
     # --- Gateway operations ---
 
     def check_token(self, token: str) -> PlexAccount:
+        if not self.plex_tv_answers.wait(timeout=5):
+            raise Unreachable("plex.tv timed out")
         try:
             return self._accounts_by_token[token]
         except KeyError:
