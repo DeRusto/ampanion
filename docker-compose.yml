@@ -1,0 +1,13 @@
+services:
+  ampanion:
+    image: ghcr.io/derusto/ampanion:latest
+    container_name: ampanion
+    environment:
+      - TZ=Etc/UTC
+      - PUID=1000
+      - PGID=1000
+    volumes:
+      - ./ampanion:/config
+    ports:
+      - 8484:8484
+    restart: unless-stopped
