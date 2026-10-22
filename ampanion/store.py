@@ -78,3 +78,31 @@ class Store:
                 "INSERT OR REPLACE INTO app_settings VALUES (?, ?)",
                 [("owner_account_id", str(account_id)), ("owner_username", username), ("owner_token", token)],
             )
+
+    @property
+    def server_machine_id(self) -> str | None:
+        return self._setting("server_machine_id")
+
+    @property
+    def server_name(self) -> str | None:
+        return self._setting("server_name")
+
+    @property
+    def server_manual_url(self) -> str | None:
+        return self._setting("server_manual_url") or None
+
+    @property
+    def server_url(self) -> str | None:
+        """Where ampanion reaches the Plex server: the manual URL from Settings if set, else the discovered one."""
+        return self.server_manual_url or self._setting("server_url") or None
+
+    def set_server(self, machine_id: str, name: str, url: str | None) -> None:
+        with self.connect() as db:
+            db.executemany(
+                "INSERT OR REPLACE INTO app_settings VALUES (?, ?)",
+                [("server_machine_id", machine_id), ("server_name", name), ("server_url", url or "")],
+            )
+
+    def set_server_manual_url(self, url: str | None) -> None:
+        with self.connect() as db:
+            db.execute("INSERT OR REPLACE INTO app_settings VALUES ('server_manual_url', ?)", (url or "",))

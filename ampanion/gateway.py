@@ -38,6 +38,15 @@ class Pin:
 
 
 @dataclass(frozen=True)
+class PlexConnection:
+    """One way plex.tv says a server can be reached."""
+
+    uri: str
+    local: bool
+    relay: bool
+
+
+@dataclass(frozen=True)
 class PlexResource:
     """A device on the account, as plex.tv lists it. `provides` is comma-separated, e.g. "server"."""
 
@@ -45,6 +54,11 @@ class PlexResource:
     client_identifier: str
     provides: str
     owned: bool
+    connections: tuple[PlexConnection, ...] = ()
+
+    @property
+    def is_server(self) -> bool:
+        return "server" in self.provides.split(",")
 
 
 class Gateway(Protocol):
@@ -62,6 +76,10 @@ class Gateway(Protocol):
 
     def resources(self, token: str) -> list[PlexResource]:
         """The devices (servers, players) the token's account can see, with whether it owns them."""
+        ...
+
+    def server_identity(self, url: str, token: str) -> str:
+        """The machineIdentifier of the Plex server answering at url. Raises Unreachable if none answers."""
         ...
 
 
@@ -104,7 +122,24 @@ class PlexGateway:
     def resources(self, token: str) -> list[PlexResource]:
         return [
             PlexResource(
-                name=r["name"], client_identifier=r["clientIdentifier"], provides=r["provides"], owned=bool(r["owned"])
+                name=r["name"],
+                client_identifier=r["clientIdentifier"],
+                provides=r["provides"],
+                owned=bool(r["owned"]),
+                connections=tuple(
+                    PlexConnection(uri=c["uri"], local=bool(c["local"]), relay=bool(c["relay"]))
+                    for c in r.get("connections", [])
+                ),
             )
-            for r in self._plex_tv("GET", "/resources", token)
+            for r in self._plex_tv("GET", "/resources", token, params={"includeHttps": "1", "includeRelay": "1"})
         ]
+
+    def server_identity(self, url: str, token: str) -> str:
+        headers = {"Accept": "application/json", "X-Plex-Token": token}
+        try:
+            # Short timeout: connections are probed one after another and a dead LAN address must not stall the page.
+            response = self._http.get(f"{url.rstrip('/')}/identity", headers=headers, timeout=5)
+            response.raise_for_status()
+            return response.json()["MediaContainer"]["machineIdentifier"]
+        except (httpx.HTTPError, ValueError, KeyError) as e:
+            raise Unreachable(f"Plex server at {url}: {e}") from e

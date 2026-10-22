@@ -8,7 +8,8 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from ampanion.auth import SESSION_MAX_AGE, add_sign_in_routes, csrf_token, session_guard
 from ampanion.clock import Clock
-from ampanion.gateway import Gateway
+from ampanion.gateway import Gateway, GatewayError
+from ampanion.server import add_server_routes, choose, owned_servers
 from ampanion.store import Store
 
 HERE = Path(__file__).parent
@@ -36,6 +37,7 @@ def create_app(*, config_dir: Path, gateway: Gateway, clock: Clock, rng: Random)
     app.state.rng = rng
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     add_sign_in_routes(app, store=store, gateway=gateway, clock=clock, templates=templates)
+    add_server_routes(app, store=store, gateway=gateway)
 
     @app.get("/health")
     def health():
@@ -44,10 +46,31 @@ def create_app(*, config_dir: Path, gateway: Gateway, clock: Clock, rng: Random)
 
     @app.get("/")
     def home(request: Request):
-        return templates.TemplateResponse(request, "home.html", {"page": "home"})
+        servers, plex_error = [], None
+        if store.server_machine_id is None:
+            try:
+                servers = owned_servers(gateway, store.owner_token)
+            except GatewayError:
+                plex_error = "Couldn't reach Plex to list your servers. Try again."
+            if len(servers) == 1:
+                choose(store, gateway, servers[0])
+        checklist = {
+            "server": store.server_machine_id is not None,
+            "tautulli": False,  # shortcut: Tautulli isn't connectable yet, its ticket ticks this
+            "listener": False,  # shortcut: no Listeners yet, #27 ticks this once one exists
+        }
+        context = {
+            "page": "home",
+            "checklist": checklist,
+            # Tautulli is optional, so setup is complete without it.
+            "setup_complete": checklist["server"] and checklist["listener"],
+            "servers": servers,
+            "plex_error": plex_error,
+        }
+        return templates.TemplateResponse(request, "home.html", context)
 
     @app.get("/settings")
     def settings(request: Request):
-        return templates.TemplateResponse(request, "settings.html", {"page": "settings", "owner": store.owner_username})
+        return templates.TemplateResponse(request, "settings.html", {"page": "settings", "store": store})
 
     return app

@@ -2,4 +2,28 @@
 {% block title %}Home{% endblock %}
 {% block main %}
 <h1>Home</h1>
+{% if not setup_complete %}
+<section class="checklist">
+  <h2>Getting started</h2>
+  <ol>
+    <li class="{{ 'done' if checklist.server else 'todo' }}">Choose your Plex server
+      {% if not checklist.server %}
+        {% if plex_error %}<p class="error" role="alert">{{ plex_error }}</p>
+        {% elif not servers %}<p>This Plex account doesn't own a Plex Media Server.</p>
+        {% else %}
+        <p>Servers you own on this Plex account:</p>
+        {% for server in servers %}
+        <form method="post" action="/server">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" name="machine_id" value="{{ server.client_identifier }}">{{ server.name }}</button>
+        </form>
+        {% endfor %}
+        {% endif %}
+      {% endif %}
+    </li>
+    <li class="{{ 'done' if checklist.tautulli else 'todo' }}">Connect Tautulli (optional)</li>
+    <li class="{{ 'done' if checklist.listener else 'todo' }}">Pick at least one Listener</li>
+  </ol>
+</section>
+{% endif %}
 {% endblock %}

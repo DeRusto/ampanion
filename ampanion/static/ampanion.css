@@ -38,3 +38,7 @@ main { flex: 1; max-width: 960px; padding: 16px 24px; }
   .sidebar .settings { margin-top: 0; }
   main { padding: 16px; }
 }
+
+.checklist li { margin-bottom: 8px; }
+.checklist li.done { color: var(--dim); }
+.checklist li.done::marker { content: "\2713  "; color: var(--ok); }

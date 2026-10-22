@@ -1,10 +1,10 @@
 """In-memory stand-ins for everything outside ampanion. Tests set up the world here, then drive the app."""
 
 import itertools
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 
-from ampanion.gateway import Pin, PlexAccount, PlexResource, TokenExpired, Unreachable
+from ampanion.gateway import Pin, PlexAccount, PlexConnection, PlexResource, TokenExpired, Unreachable
 
 
 @dataclass
@@ -20,6 +20,7 @@ class FakeGateway:
         self._accounts_by_token: dict[str, PlexAccount] = {}
         self._resources_by_account: dict[int, list[PlexResource]] = {}
         self._pins: dict[int, FakePin] = {}
+        self._servers_by_uri: dict[str, str] = {}  # uri -> machineIdentifier of the server answering there
         self._ids = itertools.count(1)
 
     # --- set up the world ---
@@ -32,13 +33,41 @@ class FakeGateway:
     def expire_token(self, token: str) -> None:
         del self._accounts_by_token[token]
 
-    def add_server(self, owner_token: str, name: str = "Plex Server", machine_id: str | None = None) -> PlexResource:
-        """A Plex Media Server owned by the account holding owner_token."""
+    def add_server(
+        self,
+        owner_token: str,
+        name: str = "Plex Server",
+        machine_id: str | None = None,
+        connections: list[PlexConnection] | None = None,
+        answering: list[str] | None = None,
+    ) -> PlexResource:
+        """A Plex Media Server owned by the account holding owner_token.
+
+        By default it has one local connection that answers; `answering` names the connection URIs that do.
+        """
+        machine_id = machine_id or f"machine-{next(self._ids)}"
+        if connections is None:
+            connections = [PlexConnection(uri=f"http://{machine_id}.lan:32400", local=True, relay=False)]
         server = PlexResource(
-            name=name, client_identifier=machine_id or f"machine-{next(self._ids)}", provides="server", owned=True
+            name=name, client_identifier=machine_id, provides="server", owned=True, connections=tuple(connections)
         )
+        for uri in [c.uri for c in connections] if answering is None else answering:
+            self.serve(uri, machine_id)
         self._resources_by_account.setdefault(self._accounts_by_token[owner_token].id, []).append(server)
         return server
+
+    def serve(self, uri: str, machine_id: str) -> None:
+        """The Plex server machine_id answers at uri."""
+        self._servers_by_uri[uri] = machine_id
+
+    def share_server(self, server: PlexResource, with_token: str) -> None:
+        """The account holding with_token sees server, without owning it (a friend or Home member)."""
+        self._resources_by_account.setdefault(self.check_token(with_token).id, []).append(replace(server, owned=False))
+
+    def disown_server(self, token: str, machine_id: str) -> None:
+        """The account holding token still sees the server, but no longer owns it."""
+        resources = self._resources_by_account[self.check_token(token).id]
+        resources[:] = [replace(r, owned=False) if r.client_identifier == machine_id else r for r in resources]
 
     def approve_pin(self, code: str, token: str) -> None:
         """The person signs in on Plex's auth page, which attaches their token to the PIN."""
@@ -67,6 +96,11 @@ class FakeGateway:
 
     def resources(self, token: str) -> list[PlexResource]:
         return list(self._resources_by_account.get(self.check_token(token).id, []))
+
+    def server_identity(self, url: str, token: str) -> str:
+        if url not in self._servers_by_uri:
+            raise Unreachable(f"Plex server at {url}: connection refused")
+        return self._servers_by_uri[url]
 
 
 class FakeClock:

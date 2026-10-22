@@ -3,7 +3,7 @@
 import httpx
 import pytest
 
-from ampanion.gateway import GatewayError, PlexAccount, PlexGateway, PlexResource, TokenExpired, Unreachable
+from ampanion.gateway import GatewayError, PlexAccount, PlexConnection, PlexGateway, PlexResource, TokenExpired, Unreachable
 from tests.fakes import FakeGateway
 
 
@@ -72,14 +72,45 @@ def test_a_sign_in_pin_is_strong_and_its_token_is_read_back_once_plex_attaches_i
 def test_resources_say_which_servers_the_account_owns():
     real, requests = recording_plex_tv(
         [
-            {"name": "Basement", "clientIdentifier": "m1", "provides": "server", "owned": True},
+            {
+                "name": "Basement",
+                "clientIdentifier": "m1",
+                "provides": "server",
+                "owned": True,
+                "connections": [
+                    {"uri": "http://192.168.1.20:32400", "local": True, "relay": False},
+                    {"uri": "https://relay.plex.direct:8443", "local": False, "relay": True},
+                ],
+            },
             {"name": "Phone", "clientIdentifier": "p1", "provides": "client,player", "owned": True},
         ]
     )
     resources = real.resources("owner-token")
     assert requests[0].headers["X-Plex-Token"] == "owner-token"
-    assert resources[0] == PlexResource(name="Basement", client_identifier="m1", provides="server", owned=True)
+    assert requests[0].url.params["includeRelay"] == "1"
+    connections = (
+        PlexConnection(uri="http://192.168.1.20:32400", local=True, relay=False),
+        PlexConnection(uri="https://relay.plex.direct:8443", local=False, relay=True),
+    )
+    assert resources[0] == PlexResource(
+        name="Basement", client_identifier="m1", provides="server", owned=True, connections=connections
+    )
 
     fake = fake_with_owner()
-    fake.add_server(owner_token="owner-token", name="Basement", machine_id="m1")
+    fake.add_server(owner_token="owner-token", name="Basement", machine_id="m1", connections=list(connections))
     assert fake.resources("owner-token") == [resources[0]]
+
+
+def test_a_plex_server_names_its_machine_id_or_is_unreachable():
+    real, requests = recording_plex_tv({"MediaContainer": {"machineIdentifier": "m1"}})
+    assert real.server_identity("http://192.168.1.20:32400", "owner-token") == "m1"
+    assert str(requests[0].url) == "http://192.168.1.20:32400/identity"
+    assert requests[0].headers["X-Plex-Token"] == "owner-token"
+    with pytest.raises(Unreachable):
+        plex_tv(503).server_identity("http://192.168.1.20:32400", "owner-token")
+
+    fake = fake_with_owner()
+    fake.add_server(owner_token="owner-token", machine_id="m1")
+    assert fake.server_identity("http://m1.lan:32400", "owner-token") == "m1"
+    with pytest.raises(Unreachable):
+        fake.server_identity("http://elsewhere:32400", "owner-token")

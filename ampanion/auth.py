@@ -20,6 +20,7 @@ SESSION_MAX_AGE = 14 * 24 * 3600
 PUBLIC_PATHS = {"/health", "/signin", "/signin/plex", "/signin/callback"}
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 NO_SERVER = "This Plex account doesn't own a Plex Media Server"
+NOT_SERVER_OWNER = "This Plex account doesn't own ampanion's Plex server"
 
 
 def csrf_token(secret: str, session: dict) -> str | None:
@@ -81,11 +82,14 @@ def add_sign_in_routes(app: FastAPI, *, store: Store, gateway: Gateway, clock: C
                 return page(request, "Plex sign-in wasn't completed. Try again.", 403)
             account = gateway.check_token(token)
             if store.owner_account_id is None:
-                owns_server = any(r.owned and "server" in r.provides.split(",") for r in gateway.resources(token))
-                if not owns_server:
+                if not any(r.owned and r.is_server for r in gateway.resources(token)):
                     return page(request, NO_SERVER, 403)
             elif account.id != store.owner_account_id:
                 return page(request, "Only ampanion's Owner can sign in.", 403)
+            elif store.server_machine_id is not None:
+                chosen = store.server_machine_id
+                if not any(r.owned and r.is_server and r.client_identifier == chosen for r in gateway.resources(token)):
+                    return page(request, NOT_SERVER_OWNER, 403)
         except GatewayError:
             return page(request, "Couldn't reach Plex. Try again.", 502)
 

@@ -3,8 +3,21 @@
 {% block main %}
 <h1>Settings</h1>
 <section>
-  <h2>Owner</h2>
-  <p>Signed in as {{ owner }}</p>
+  <h2>Plex</h2>
+  {% if store.server_machine_id %}
+  <p>Server: <b>{{ store.server_name }}</b>
+    {% if store.server_url %}at {{ store.server_url }}{% else %}<span class="error">couldn't be reached; set its URL below</span>{% endif %}</p>
+  {% else %}
+  <p>No Plex server chosen yet. Choose one on <a href="/">Home</a>.</p>
+  {% endif %}
+  <form method="post" action="/settings/server-url">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Manual server URL (optional, overrides the one found through plex.tv)
+      <input type="url" name="url" value="{{ store.server_manual_url or '' }}" placeholder="http://192.168.1.20:32400">
+    </label>
+    <button type="submit">Save</button>
+  </form>
+  <p>Signed in as {{ store.owner_username }} (Owner)</p>
   <form method="post" action="/signout">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button type="submit">Sign out</button>
