@@ -206,14 +206,18 @@ class Store:
         """The Owner's Plex token: a full-account credential, never logged or sent to the browser."""
         return self._setting("owner_token")
 
-    def set_owner(self, account_id: int, username: str, token: str) -> None:
-        """Store the Owner and their token; a new token is never an expired one."""
+    def claim_owner(self, account_id: int, username: str, token: str) -> bool:
+        """Store the Owner and their token, unless another account is already the Owner (False).
+
+        One transaction, so of two first sign-ins at once only one becomes the Owner. A new token is never an expired one.
+        """
         with self.connect() as db:
-            db.executemany(
-                "INSERT OR REPLACE INTO app_settings VALUES (?, ?)",
-                [("owner_account_id", str(account_id)), ("owner_username", username), ("owner_token", token)],
-            )
+            db.execute("INSERT OR IGNORE INTO app_settings VALUES ('owner_account_id', ?)", (str(account_id),))
+            if db.execute("SELECT value FROM app_settings WHERE key = 'owner_account_id'").fetchone()[0] != str(account_id):
+                return False
+            db.executemany("INSERT OR REPLACE INTO app_settings VALUES (?, ?)", [("owner_username", username), ("owner_token", token)])
             db.execute("DELETE FROM app_settings WHERE key = 'owner_token_expired'")
+        return True
 
     @property
     def owner_token_expired(self) -> bool:

@@ -58,6 +58,7 @@ class FakeGateway:
         self.killed_reading_history = False  # ampanion's process dies (e.g. the container stops) mid-Refresh
         self.while_reading_history = lambda: None  # what else happens (e.g. the Owner clicks) while history is read
         self._hidden_sections: dict[str, set[str]] = defaultdict(set)  # token -> music libraries its share leaves out
+        self.while_reading_resources = lambda: None  # what else happens (e.g. another sign-in) while plex.tv answers
         self.rejected_tokens: set[str] = set()  # tokens the Plex server answers 401 to, e.g. a revoked share token
         # Tautulli: where it answers, its API key and the Plex server it watches; its track history by plex.tv user id.
         self._tautulli: dict[str, tuple[str, str]] = {}
@@ -237,6 +238,7 @@ class FakeGateway:
         return self._pins[pin_id].token
 
     def resources(self, token: str) -> list[PlexResource]:
+        self.while_reading_resources()
         return list(self._resources_by_account.get(self.check_token(token).id, []))
 
     def server_identity(self, url: str, token: str) -> str:
