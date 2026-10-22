@@ -148,7 +148,9 @@ class Scheduler:
                 with self._lock:
                     run, self.running = self._queue[0], True
                 self._run(run)
-                if run.slot:  # only now: a run cut short (ampanion killed) is caught up on the next start
+                # only now: a run cut short (ampanion killed) is caught up on the next start. Never backwards: a run
+                # time saved during the run has already marked its own, later slot done.
+                if run.slot and run.slot > self.store.last_slot:
                     self.store.set_last_slot(run.slot)
                 with self._lock:
                     self._queue.popleft()

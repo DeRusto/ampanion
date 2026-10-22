@@ -309,3 +309,17 @@ def test_mix_settings_and_turning_off_wait_for_a_running_refresh(client, gateway
     assert 'name="length" value="10"' in client.get("/listeners/8").text
     page = client.get("/listeners/8/turn-off").text
     assert client.post("/listeners/8/turn-off", data={"csrf_token": csrf_from(page)}).url.path == "/"
+
+
+
+def test_a_schedule_saved_during_a_nightly_run_isnt_undone_when_the_run_ends(client, gateway, clock, pal):
+    background(client)  # Pal's first Refresh
+    until(clock, 9, day=6)  # 04:00 in New York
+    clock.advance(minutes=10)
+    gateway.while_reading_history = lambda: set_schedule(client, "04:05")  # while the 04:00 run reads history
+    background(client)
+    gateway.while_reading_history = lambda: None
+
+    background(client)  # 04:05 has passed, but it never was the run time
+
+    assert runs(client) == 2
