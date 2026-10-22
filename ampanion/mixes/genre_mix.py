@@ -2,7 +2,7 @@
 
 from collections import Counter
 
-from ampanion.mixes.artists import pick_capped
+from ampanion.mixes.artists import pick_capped, spread_shuffle
 from ampanion.mixes.rule import Mix, MixInput, Setting
 
 TOP_GENRE_PLAYS = 20
@@ -28,8 +28,8 @@ def rule(mix: MixInput) -> dict[str | None, list[str]]:
     playlists = {}
     for genre in top_genres(mix, mix.settings["count"]):
         pool = [k for k, t in tracks.items() if genre in t.genres and k not in skipped and not mix.ratings.excludes(t)]
-        # pick_capped draws from a shuffled pool, so its pick is already in random order.
-        playlists[genre] = pick_capped(pool, artist_of, mix.settings["length"], mix.settings["tracks_per_artist"], mix.rng)
+        picked = pick_capped(pool, artist_of, mix.settings["length"], mix.settings["tracks_per_artist"], mix.rng)
+        playlists[genre] = spread_shuffle(picked, artist_of, mix.rng)
     return playlists
 
 

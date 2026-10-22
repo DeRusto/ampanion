@@ -61,6 +61,15 @@ def test_one_playlist_per_top_genre_picked_from_the_genre_and_capped_per_artist(
     assert "Rock Mix: 50 tracks" in client.get("/listeners/8?tab=history").text
 
 
+def test_genre_mix_playlists_never_put_two_tracks_by_one_artist_side_by_side(client, gateway, clock, pal):
+    genre(gateway, clock, "Rock", artists=4, tracks=6, plays=40)
+
+    for _ in range(5):
+        refresh(client)
+        artists = [k.rsplit("-", 1)[0] for k in mixes(gateway)["Rock Mix"].items]
+        assert len(artists) == 12 and all(a != b for a, b in zip(artists, artists[1:]))
+
+
 def test_no_playlist_when_no_genre_has_20_plays(client, gateway, clock, pal):
     genre(gateway, clock, "Rock", plays=19)
 
