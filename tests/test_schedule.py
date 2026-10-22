@@ -57,6 +57,16 @@ def test_the_nightly_run_fires_at_the_run_time_in_tz(client, gateway, clock, pal
     assert "Next nightly Refresh: Wed 07 Jan 04:00" in client.get("/").text
 
 
+def test_the_playlists_tab_shows_refresh_times_in_tz(client, gateway, clock, pal):
+    for n in range(1, 6):
+        play(gateway, clock, 8, f"t{n}", times=2, days_ago=n)
+
+    refresh(client)  # at 12:00 UTC, 07:00 in New York
+
+    html = client.get("/listeners/8?tab=playlists").text
+    assert "2026-01-05 07:00" in html and "UTC" not in html
+
+
 def test_the_nightly_run_refreshes_every_listener_once(client, gateway, clock, pal):
     add_listener(client, 42)
     background(client)
