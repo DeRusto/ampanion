@@ -55,3 +55,7 @@ _Avoid_: Genre radio, genre station
 **Daily Mixtape**:
 The Mix that blends familiar and unplayed tracks into one Playlist that changes every day.
 _Avoid_: Daily mix, mix tape
+
+**New Artists**:
+The Mix that introduces a Listener to artists in their library they have never played.
+_Avoid_: Discovery, discover weekly, new releases
