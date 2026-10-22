@@ -499,3 +499,21 @@ def test_tautulli_history_reads_ungrouped_track_rows_for_a_user_after_a_date_in_
     assert {r.url.params["cmd"] for r in requests} == {"get_history"}  # read commands only
     real.tautulli_history("http://tautulli:8181", "key", 42, after=None)
     assert "after" not in requests[-1].url.params
+
+
+def test_calls_inside_connections_reuse_one_server_connection_per_token():
+    real, requests_ = plex(lambda r: (200, "<MediaContainer />") if path(r) == "/library/sections" else None)
+    roots = lambda: sum(1 for r in requests_ if host(r) == "pms:32400" and path(r) == "/")
+
+    real.music_sections(URL, "t1")
+    real.music_sections(URL, "t1")
+    assert roots() == 2  # outside a block, every call connects afresh
+
+    with real.connections(), fake_with_owner().connections():
+        real.music_sections(URL, "t1")
+        real.music_sections(URL, "t1")
+        real.music_sections(URL, "t2")
+    assert roots() == 4  # one more for t1, one for t2
+
+    real.music_sections(URL, "t1")
+    assert roots() == 5  # the block's connections end with it

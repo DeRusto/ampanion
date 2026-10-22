@@ -80,7 +80,11 @@ def run(
     A 401 on the Owner token does: the Listener's record is dropped and OwnerTokenExpired raised.
     """
     store.prune_refreshes(clock.now() - KEEP_REFRESHES)
-    gateway = _WatchOwnerToken(gateway, store.owner_token)
+    with gateway.connections():  # one Plex server connection per token for the whole run
+        _run(store, _WatchOwnerToken(gateway, store.owner_token), clock, rng, listeners, due, on_listener)
+
+
+def _run(store: Store, gateway: Gateway, clock: Clock, rng: Random, listeners: list[Listener], due: Due, on_listener) -> None:
     library = None
     for i, listener in enumerate(listeners):
         on_listener(i, listener)

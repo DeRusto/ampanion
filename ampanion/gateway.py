@@ -6,7 +6,8 @@ Each operation raises a GatewayError subclass the caller can tell apart.
 """
 
 import os
-from contextlib import contextmanager
+import threading
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Protocol
@@ -145,6 +146,10 @@ class PlexPlaylist:
 
 
 class Gateway(Protocol):
+    def connections(self) -> AbstractContextManager[None]:
+        """Within this block, on this thread, reuse one Plex server connection per (url, token)."""
+        ...
+
     def check_token(self, token: str) -> PlexAccount:
         """Return the plex.tv account the token belongs to. Raises TokenExpired on 401."""
         ...
@@ -252,6 +257,7 @@ class PlexGateway:
         self._client_identifier = client_identifier
         self._http = http or httpx.Client(timeout=30)
         self._session = session or requests.Session()
+        self._local = threading.local()  # .servers: the open connections() block's PlexServers, by (url, token)
         # plexapi sends these process-wide headers on every request; there is one Gateway per process.
         plexapi.BASE_HEADERS.update({"X-Plex-Client-Identifier": client_identifier, "X-Plex-Product": PRODUCT})
 
@@ -322,10 +328,25 @@ class PlexGateway:
 
     # --- Plex server ---
 
+    @contextmanager
+    def connections(self):
+        self._local.servers = {}
+        try:
+            yield
+        finally:
+            self._local.servers = None
+
     def _server(self, url: str, token: str) -> PlexServer:
-        """A fresh connection (one GET /) per call, so new music sections and Playlists are never served from plexapi's caches."""
+        """One GET / per connection. Outside connections() every call connects afresh; inside, a connection lasts only
+        the block (one Refresh run), so plexapi's caches never serve a stale list of music sections across runs."""
+        servers = getattr(self._local, "servers", None)
+        if servers is not None and (url, token) in servers:
+            return servers[url, token]
         with _errors("Plex server"):
-            return PlexServer(url, token, session=self._session)
+            server = PlexServer(url, token, session=self._session)
+        if servers is not None:
+            servers[url, token] = server
+        return server
 
     def _music_libraries(self, server: PlexServer):
         return [s for s in server.library.sections() if s.type == "artist"]

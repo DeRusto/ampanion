@@ -3,6 +3,7 @@
 import itertools
 import threading
 from collections import defaultdict
+from contextlib import nullcontext
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 
@@ -218,6 +219,9 @@ class FakeGateway:
         return found
 
     # --- Gateway operations ---
+
+    def connections(self):
+        return nullcontext()  # the fake has no connections to reuse
 
     def check_token(self, token: str) -> PlexAccount:
         if not self.plex_tv_answers.wait(timeout=5):
