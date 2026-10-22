@@ -57,3 +57,24 @@ class Store:
     @property
     def session_secret(self) -> str:
         return self._setting("session_secret")
+
+    @property
+    def owner_account_id(self) -> int | None:
+        value = self._setting("owner_account_id")
+        return int(value) if value else None
+
+    @property
+    def owner_username(self) -> str | None:
+        return self._setting("owner_username")
+
+    @property
+    def owner_token(self) -> str | None:
+        """The Owner's Plex token: a full-account credential, never logged or sent to the browser."""
+        return self._setting("owner_token")
+
+    def set_owner(self, account_id: int, username: str, token: str) -> None:
+        with self.connect() as db:
+            db.executemany(
+                "INSERT OR REPLACE INTO app_settings VALUES (?, ?)",
+                [("owner_account_id", str(account_id)), ("owner_username", username), ("owner_token", token)],
+            )

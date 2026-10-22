@@ -2,4 +2,12 @@
 {% block title %}Settings{% endblock %}
 {% block main %}
 <h1>Settings</h1>
+<section>
+  <h2>Owner</h2>
+  <p>Signed in as {{ owner }}</p>
+  <form method="post" action="/signout">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Sign out</button>
+  </form>
+</section>
 {% endblock %}

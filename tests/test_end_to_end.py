@@ -5,11 +5,13 @@ or `start_app`, and check what the Owner or Plex would see.
 """
 
 
-def test_a_fresh_ampanion_comes_up_serves_its_pages_and_survives_a_restart(start_app, gateway, clock):
+def test_a_fresh_ampanion_comes_up_serves_its_pages_and_survives_a_restart(start_app, gateway, clock, sign_in):
     gateway.add_account("owner", token="owner-token")
+    gateway.add_server(owner_token="owner-token")
 
     with start_app() as client:
         assert client.get("/health").status_code == 200
+        sign_in(client, "owner-token")
         assert ">Home<" in client.get("/").text
         assert "<h1>Settings</h1>" in client.get("/settings").text
         identifier = client.app.state.store.client_identifier

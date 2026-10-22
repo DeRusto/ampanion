@@ -1,4 +1,4 @@
-def test_home_shows_the_ampanion_layout_with_home_and_settings_in_the_sidebar(client):
+def test_home_shows_the_ampanion_layout_with_home_and_settings_in_the_sidebar(client, signed_in):
     response = client.get("/")
 
     assert response.status_code == 200
@@ -10,7 +10,7 @@ def test_home_shows_the_ampanion_layout_with_home_and_settings_in_the_sidebar(cl
     assert "<h1>Home</h1>" in html
 
 
-def test_settings_page_uses_the_same_layout(client):
+def test_settings_page_uses_the_same_layout(client, signed_in):
     response = client.get("/settings")
 
     assert response.status_code == 200
@@ -18,7 +18,7 @@ def test_settings_page_uses_the_same_layout(client):
     assert "<h1>Settings</h1>" in response.text
 
 
-def test_layout_is_styled_in_plex_colours(client):
+def test_layout_is_styled_in_plex_colours(client, signed_in):
     css = client.get("/static/ampanion.css")
 
     assert css.status_code == 200

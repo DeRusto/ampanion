@@ -6,14 +6,16 @@
   <title>{% block title %}{% endblock %} · ampanion</title>
   <link rel="stylesheet" href="/static/ampanion.css">
 </head>
-<body>
+<body{% if csrf_token %} hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'{% endif %}>
   <nav class="sidebar">
     <a class="brand" href="/">
       <span class="wordmark"><span class="amp">Amp</span><span class="anion">anion</span></span>
       <span class="tagline">Your Plexamp companion for playlists that make themselves.</span>
     </a>
+    {% if csrf_token %}
     <a class="item{% if page == 'home' %} on{% endif %}" href="/">Home</a>
     <a class="item settings{% if page == 'settings' %} on{% endif %}" href="/settings">Settings</a>
+    {% endif %}
   </nav>
   <main>
     {% block main %}{% endblock %}

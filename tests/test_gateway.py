@@ -3,7 +3,7 @@
 import httpx
 import pytest
 
-from ampanion.gateway import GatewayError, PlexAccount, PlexGateway, TokenExpired, Unreachable
+from ampanion.gateway import GatewayError, PlexAccount, PlexGateway, PlexResource, TokenExpired, Unreachable
 from tests.fakes import FakeGateway
 
 
@@ -41,3 +41,45 @@ def test_other_failures_are_gateway_errors_but_not_token_expiry():
     assert issubclass(TokenExpired, GatewayError)
     assert issubclass(Unreachable, GatewayError)
     assert not issubclass(Unreachable, TokenExpired)
+
+
+def recording_plex_tv(body) -> tuple[PlexGateway, list[httpx.Request]]:
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(200, json=body)
+
+    return PlexGateway(client_identifier="test-client", http=httpx.Client(transport=httpx.MockTransport(handle))), requests
+
+
+def test_a_sign_in_pin_is_strong_and_its_token_is_read_back_once_plex_attaches_it():
+    real, requests = recording_plex_tv({"id": 7, "code": "abcd"})
+    assert real.create_pin().code == "abcd"
+    assert requests[0].method == "POST" and requests[0].url.params["strong"] == "true"
+    assert requests[0].headers["X-Plex-Client-Identifier"] == "test-client"
+
+    assert plex_tv(200, {"id": 7, "authToken": None}).pin_token(7) is None
+    assert plex_tv(200, {"id": 7, "authToken": "tok"}).pin_token(7) == "tok"
+
+    fake = fake_with_owner()
+    pin = fake.create_pin()
+    assert fake.pin_token(pin.id) is None
+    fake.approve_pin(pin.code, "owner-token")
+    assert fake.pin_token(pin.id) == "owner-token"
+
+
+def test_resources_say_which_servers_the_account_owns():
+    real, requests = recording_plex_tv(
+        [
+            {"name": "Basement", "clientIdentifier": "m1", "provides": "server", "owned": True},
+            {"name": "Phone", "clientIdentifier": "p1", "provides": "client,player", "owned": True},
+        ]
+    )
+    resources = real.resources("owner-token")
+    assert requests[0].headers["X-Plex-Token"] == "owner-token"
+    assert resources[0] == PlexResource(name="Basement", client_identifier="m1", provides="server", owned=True)
+
+    fake = fake_with_owner()
+    fake.add_server(owner_token="owner-token", name="Basement", machine_id="m1")
+    assert fake.resources("owner-token") == [resources[0]]
