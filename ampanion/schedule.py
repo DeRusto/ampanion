@@ -17,7 +17,7 @@ from fastapi.responses import RedirectResponse
 
 from ampanion import refresh
 from ampanion.clock import Clock
-from ampanion.gateway import Gateway
+from ampanion.gateway import Gateway, GatewayError, TokenExpired
 from ampanion.mixes import MIXES, Mix, mix_cadence
 from ampanion.store import Listener, Store
 
@@ -26,6 +26,7 @@ log = logging.getLogger(__name__)
 CADENCES = ("daily", "weekly")
 MONDAY = 0
 POLL_SECONDS = 30
+EXPIRED = "Plex sign-in expired"
 
 
 def last_slot(now: datetime, run_time: time, tz: tzinfo, weekday: int | None = None) -> datetime:
@@ -59,6 +60,7 @@ class Scheduler:
         self.progress: str | None = None  # what the run in progress is doing, for the Refresh buttons
         if store.last_slot is None:  # a fresh install has missed no run
             self.mark_slot_done()
+        self.check_owner_token()  # at startup
 
     @property
     def busy(self) -> bool:
@@ -69,6 +71,32 @@ class Scheduler:
 
     def mark_slot_done(self) -> None:
         self.store.set_last_slot(last_slot(self.clock.now(), self.store.run_time, self.tz))
+
+    def check_owner_token(self) -> None:
+        """Ask plex.tv whether the Owner token still works. Only a 401 proves it dead; Plex being down doesn't."""
+        if self.store.owner_token is None or self.store.owner_token_expired:
+            return
+        try:
+            self.gateway.check_token(self.store.owner_token)
+        except TokenExpired:
+            self._owner_token_expired()
+        except GatewayError:
+            log.warning("Couldn't check the Plex sign-in with plex.tv")
+
+    def _owner_token_expired(self) -> None:
+        """Pause every Refresh, with one record saying so (not one per Listener)."""
+        if self.store.owner_token_expired:
+            return
+        self.store.set_owner_token_expired()
+        now = self.clock.now()
+        self.store.finish_refresh(self.store.start_refresh(None, now), now, "failed", [], EXPIRED)
+
+    def catch_up(self) -> None:
+        """The Owner signed in again: one run, like a nightly one, for whatever was missed while paused."""
+        with self._lock:
+            self._queue.append(Run(None, nightly=True))
+            self.progress = self.progress or "Refresh starting…"
+        self._wake.set()
 
     def request(self, account_ids: list[int] | None) -> None:
         """Queue a Refresh of these Listeners (None: all) that rebuilds every enabled Mix."""
@@ -112,6 +140,10 @@ class Scheduler:
             self._running.release()
 
     def _run(self, run: Run) -> None:
+        if run.nightly:
+            self.check_owner_token()
+        if self.store.owner_token_expired:  # paused: no Playlist is touched
+            return
         listeners = self.store.listeners()
         if run.account_ids is not None:
             listeners = [l for l in listeners if l.account_id in run.account_ids]
@@ -122,6 +154,8 @@ class Scheduler:
 
         try:
             refresh.run(self.store, self.gateway, self.clock, self.rng, listeners, due, on_listener)
+        except refresh.OwnerTokenExpired:
+            self._owner_token_expired()
         except Exception:  # the queue must keep moving
             log.exception("Refresh run failed")
 
@@ -149,6 +183,8 @@ class Scheduler:
 
 def add_schedule_routes(app: FastAPI, *, store: Store, scheduler: Scheduler):
     def refresh_now(account_ids: list[int] | None, back: str):
+        if store.owner_token_expired:
+            raise HTTPException(409, f"{EXPIRED}, so Refreshes are paused. Sign in again to resume them.")
         if not scheduler.request_now(account_ids):
             raise HTTPException(409, "A Refresh is already running")
         return RedirectResponse(back, 303)

@@ -8,7 +8,8 @@
   <ol>
     <li class="{{ 'done' if checklist.server else 'todo' }}">Choose your Plex server
       {% if not checklist.server %}
-        {% if plex_error %}<p class="error" role="alert">{{ plex_error }}</p>
+        {% if plex_expired %}<p>Plex sign-in expired. <a href="/signin/plex">Sign in again</a> to reconnect.</p>
+        {% elif plex_error %}<p class="error" role="alert">{{ plex_error }}</p>
         {% elif not servers %}<p>This Plex account doesn't own a Plex Media Server.</p>
         {% else %}
         <p>Servers you own on this Plex account:</p>

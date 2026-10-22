@@ -32,6 +32,9 @@
     {% endif %}
   </nav>
   <main>
+    {% if csrf_token and plex_expired %}
+    <p class="banner error" role="alert">Plex sign-in expired, so Refreshes are paused. <a href="/signin/plex">Sign in again</a></p>
+    {% endif %}
     {% block main %}{% endblock %}
   </main>
 </body>

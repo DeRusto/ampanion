@@ -67,3 +67,4 @@ main { flex: 1; max-width: 960px; padding: 16px 24px; }
 .refreshes { width: 100%; border-collapse: collapse; }
 .refreshes th, .refreshes td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .refreshes tr.failed td:nth-last-child(2) { color: var(--bad); }
+.banner { border: 1px solid var(--bad); border-radius: 6px; padding: 8px 12px; margin: 0 0 16px; }

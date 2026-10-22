@@ -51,6 +51,7 @@ class FakeGateway:
         self._playlists: dict[str, list[FakePlaylist]] = defaultdict(list)  # token -> its account's Playlists
         self.item_batches: dict[str, list[int]] = defaultdict(list)  # token -> size of each create/add call
         self.history_down = False
+        self.rejected_tokens: set[str] = set()  # tokens the Plex server answers 401 to, e.g. a revoked share token
 
     # --- set up the world ---
 
@@ -170,7 +171,7 @@ class FakeGateway:
     def _server_token(self, token: str) -> None:
         """Plex server calls take an account token or a shared server token; anything else is refused."""
         shared = {t for tokens in self._shared_tokens.values() for t in tokens.values()}
-        if token not in self._accounts_by_token and token not in shared:
+        if token in self.rejected_tokens or (token not in self._accounts_by_token and token not in shared):
             raise TokenExpired("The Plex server rejected the token")
 
     def _playlist(self, token: str, playlist_id: str) -> FakePlaylist:

@@ -43,6 +43,7 @@ def create_app(
             lambda request: {"csrf_token": csrf_token(store.session_secret, request.session)},
             sidebar,
             lambda request: {"scheduler": scheduler, "cadences": {k: mix_cadence(store, m) for k, m in MIXES.items()}},
+            lambda request: {"plex_expired": store.owner_token_expired},
         ],
     )
     templates.env.filters["local"] = lambda dt: dt.astimezone(tz)
@@ -61,7 +62,7 @@ def create_app(
     app.state.rng = rng
     app.state.scheduler = scheduler
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
-    add_sign_in_routes(app, store=store, gateway=gateway, clock=clock, templates=templates)
+    add_sign_in_routes(app, store=store, gateway=gateway, clock=clock, templates=templates, scheduler=scheduler)
     add_server_routes(app, store=store, gateway=gateway)
     add_listener_routes(app, store=store, gateway=gateway, clock=clock, templates=templates, scheduler=scheduler)
     add_schedule_routes(app, store=store, scheduler=scheduler)
@@ -82,7 +83,7 @@ def create_app(
             if len(servers) == 1:
                 choose(store, gateway, servers[0])
         checklist = {
-            "server": store.server_machine_id is not None,
+            "server": store.server_machine_id is not None and not store.owner_token_expired,
             "tautulli": False,  # shortcut: Tautulli isn't connectable yet, its ticket ticks this
             "listener": bool(store.listeners()),
         }

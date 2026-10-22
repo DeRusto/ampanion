@@ -173,11 +173,22 @@ class Store:
         return self._setting("owner_token")
 
     def set_owner(self, account_id: int, username: str, token: str) -> None:
+        """Store the Owner and their token; a new token is never an expired one."""
         with self.connect() as db:
             db.executemany(
                 "INSERT OR REPLACE INTO app_settings VALUES (?, ?)",
                 [("owner_account_id", str(account_id)), ("owner_username", username), ("owner_token", token)],
             )
+            db.execute("DELETE FROM app_settings WHERE key = 'owner_token_expired'")
+
+    @property
+    def owner_token_expired(self) -> bool:
+        """plex.tv rejected the Owner token: Refreshes are paused until the Owner signs in again."""
+        return self._setting("owner_token_expired") is not None
+
+    def set_owner_token_expired(self) -> None:
+        with self.connect() as db:
+            db.execute("INSERT OR REPLACE INTO app_settings VALUES ('owner_token_expired', '1')")
 
     @property
     def server_machine_id(self) -> str | None:
@@ -352,6 +363,10 @@ class Store:
                 "UPDATE refreshes SET ended_at = ?, outcome = ?, mixes = ?, error = ? WHERE id = ?",
                 (ended_at.isoformat(), outcome, json.dumps(mixes), error, refresh_id),
             )
+
+    def delete_refresh(self, refresh_id: int) -> None:
+        with self.connect() as db:
+            db.execute("DELETE FROM refreshes WHERE id = ?", (refresh_id,))
 
     def prune_refreshes(self, before: datetime) -> None:
         with self.connect() as db:

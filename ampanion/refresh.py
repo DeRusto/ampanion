@@ -10,7 +10,7 @@ from random import Random
 
 from ampanion import history
 from ampanion.clock import Clock
-from ampanion.gateway import Gateway, GatewayError
+from ampanion.gateway import Gateway, GatewayError, TokenExpired
 from ampanion.library import LibraryIndex, Ratings
 from ampanion.mixes import MIXES, Mix, MixInput, mix_config
 from ampanion.publisher import delete_playlists, playlist_title, publish
@@ -24,6 +24,31 @@ OWNER_HISTORY_ACCOUNT = 1  # the Owner's account id in the server's own history,
 
 class RefreshFailed(Exception):
     """The Listener's Refresh stops before any Playlist is touched; the message goes on the Refresh record."""
+
+
+class OwnerTokenExpired(Exception):
+    """A call with the Owner token got a 401: the whole run stops, and Refreshes pause until the Owner signs in again."""
+
+
+class _WatchOwnerToken:
+    """The Gateway, raising OwnerTokenExpired (not a GatewayError, so nothing on the way catches it) when a call made
+    with the Owner token gets a 401. A 401 on a Listener's own token stays an ordinary failure of their Refresh."""
+
+    def __init__(self, gateway: Gateway, owner_token: str):
+        self._gateway, self._owner_token = gateway, owner_token
+
+    def __getattr__(self, name):
+        call = getattr(self._gateway, name)
+
+        def watched(*args, **kwargs):
+            try:
+                return call(*args, **kwargs)
+            except TokenExpired as e:
+                if self._owner_token in (*args, *kwargs.values()):
+                    raise OwnerTokenExpired() from e
+                raise
+
+        return watched
 
 
 def step(error: str, call, *args):
@@ -50,8 +75,12 @@ def run(
     store: Store, gateway: Gateway, clock: Clock, rng: Random, listeners: list[Listener],
     due: Due = lambda account_id, mix: True, on_listener: Callable[[int, Listener], None] = lambda i, listener: None,
 ) -> None:
-    """Refresh each Listener in turn, writing a Refresh record for each. One Listener's failure doesn't stop the rest."""
+    """Refresh each Listener in turn, writing a Refresh record for each. One Listener's failure doesn't stop the rest.
+
+    A 401 on the Owner token does: the Listener's record is dropped and OwnerTokenExpired raised.
+    """
     store.prune_refreshes(clock.now() - KEEP_REFRESHES)
+    gateway = _WatchOwnerToken(gateway, store.owner_token)
     library = None
     for i, listener in enumerate(listeners):
         on_listener(i, listener)
@@ -63,6 +92,9 @@ def run(
             if library is None:  # loaded once per run and shared by every Listener in it
                 library = step("Couldn't read the music library from Plex", LibraryIndex.load, gateway, store.server_url, store.owner_token)
             mixes = refresh_listener(store, gateway, clock, rng, listener, library, due)
+        except OwnerTokenExpired:
+            store.delete_refresh(record)  # the run's one record is "Plex sign-in expired", written by the scheduler
+            raise
         except RefreshFailed as e:
             error = str(e)
         except Exception as e:  # never leave a record stuck on "refreshing"
@@ -106,6 +138,8 @@ def refresh_listener(
             if dropped := previous.keys() - playlists.keys():  # e.g. a genre no longer a Top Genre
                 delete_playlists(gateway, store, url=url, token=token, account_id=account_id, mix_key=mix.key, genres=dropped)
             store.set_mix_built(account_id, mix.key, clock.now())
+        except OwnerTokenExpired:
+            raise
         except Exception as e:
             if not isinstance(e, GatewayError):
                 log.exception("%s for %s failed", mix.title, listener.name)

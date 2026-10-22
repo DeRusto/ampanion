@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 
 from ampanion.clock import Clock
 from ampanion.gateway import Gateway, GatewayError
+from ampanion.schedule import Scheduler
 from ampanion.store import Store
 
 SESSION_MAX_AGE = 14 * 24 * 3600
@@ -48,7 +49,9 @@ def session_guard(store: Store):
     return guard
 
 
-def add_sign_in_routes(app: FastAPI, *, store: Store, gateway: Gateway, clock: Clock, templates: Jinja2Templates):
+def add_sign_in_routes(
+    app: FastAPI, *, store: Store, gateway: Gateway, clock: Clock, templates: Jinja2Templates, scheduler: Scheduler
+):
     def page(request: Request, error: str | None = None, status_code: int = 200):
         return templates.TemplateResponse(request, "signin.html", {"page": "signin", "error": error}, status_code)
 
@@ -93,7 +96,10 @@ def add_sign_in_routes(app: FastAPI, *, store: Store, gateway: Gateway, clock: C
         except GatewayError:
             return page(request, "Couldn't reach Plex. Try again.", 502)
 
+        resume = store.owner_token_expired
         store.set_owner(account.id, account.username, token)
+        if resume:
+            scheduler.catch_up()
         request.session.clear()
         request.session.update(owner_account_id=account.id, login_at=clock.now().isoformat())
         return RedirectResponse("/", 303)
