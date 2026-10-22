@@ -120,7 +120,17 @@ def refresh_listener(
     ratings = Ratings(step("Couldn't read Ratings from Plex", gateway.ratings, url, token))
     plays = store.plays(account_id)
 
-    outcomes = []
+    outcomes, skips = [], []
+    if store.tautulli_url:  # without Tautulli, Mixes behave as if there were no Skips, even ones kept from before
+        try:
+            history.sync_skips(
+                store, gateway, url=store.tautulli_url, api_key=store.tautulli_api_key, account_id=account_id,
+                library=library, now=clock.now(),
+            )
+        except GatewayError as e:  # Mixes still refresh, with the Skips already kept; the Refresh is marked failed
+            outcomes.append({"mix": "skips", "outcome": "failed", "detail": f"Couldn't read Skips from Tautulli: {e}"})
+        skips = store.skips(account_id)
+
     for mix in MIXES.values():
         enabled, settings = mix_config(store, account_id, mix)
         if not enabled or not due(account_id, mix):
@@ -128,7 +138,7 @@ def refresh_listener(
         try:
             previous = {p.genre: p.tracks for p in store.managed_playlists(account_id, mix.key)}
             # Every Playlist of the Mix is computed before any is touched.
-            playlists = mix.rule(MixInput(plays, [], library, ratings, settings, previous, clock.now(), rng))
+            playlists = mix.rule(MixInput(plays, skips, library, ratings, settings, previous, clock.now(), rng))
             for genre, tracks in playlists.items():
                 status = publish(
                     gateway, store, url=url, machine_id=store.server_machine_id, token=token, account_id=account_id,

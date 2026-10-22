@@ -10,15 +10,15 @@ FAVOURED = 4  # an artist sharing a Top Genre is this many times likelier to be 
 
 
 def rule(mix: MixInput) -> dict[str | None, list[str]]:
-    """0-Play album artists, weighted toward Top Genres; per artist the most popular tracks first; capped and spread."""
+    """0-Play album artists not often skipped, weighted toward Top Genres; per artist the most popular tracks first; capped and spread."""
     tracks = mix.library.tracks
     played = {p.album_artist for p in mix.plays}
     last_time = {tracks[k].album_artist for k in mix.previous.get(None, []) if k in tracks}  # skipped for one Refresh
-    skipped = played | last_time | {VARIOUS}
+    excluded = played | last_time | mix.often_skipped(by=lambda s: s.album_artist) | {VARIOUS}
     by_artist: dict[str, list[str]] = {}
     for k, t in tracks.items():
         # an artist rated 1 star or lower is dropped even where a track's own Rating would let it through
-        if t.album_artist not in skipped and mix.ratings.by_key.get(t.artist_key, ONE_STAR + 1) > ONE_STAR and not mix.ratings.excludes(t):
+        if t.album_artist not in excluded and mix.ratings.by_key.get(t.artist_key, ONE_STAR + 1) > ONE_STAR and not mix.ratings.excludes(t):
             by_artist.setdefault(t.album_artist, []).append(k)
 
     top = set(top_genres(mix, TOP_GENRES))

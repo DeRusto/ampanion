@@ -1,4 +1,4 @@
-"""History sync: bring a Listener's cached Listening history up to date from Plex.
+"""History sync: bring a Listener's cached Listening history up to date, Plays from Plex and Skips from Tautulli.
 
 The first fill reads their whole Plex history; later syncs re-read a trailing window and insert only unseen entries.
 Plays deleted in Plex stay. Each Play keeps a track snapshot, and is re-linked by guid when its rating key changes.
@@ -8,10 +8,11 @@ from datetime import datetime, timedelta
 
 from ampanion.gateway import Gateway
 from ampanion.library import LibraryIndex
-from ampanion.store import Play, Store
+from ampanion.store import Play, Skip, Store
 
 # Longer than Plexamp's ~60-day retry for Plays made offline, so late arrivals are still picked up.
 INCREMENTAL_WINDOW = timedelta(days=90)
+SKIP_BELOW = 50  # a Tautulli row under this percent complete is a Skip
 
 
 def sync(
@@ -38,3 +39,23 @@ def sync(
     stale = {p.guid for p in store.plays(account_id) if p.rating_key not in library.tracks and p.guid in library.by_guid}
     for guid in stale:
         store.relink_plays(account_id, guid, library.by_guid[guid])
+
+
+def sync_skips(
+    store: Store, gateway: Gateway, *, url: str, api_key: str, account_id: int, library: LibraryIndex, now: datetime
+) -> None:
+    """Add the Listener's new Skips from Tautulli, whose user ids are plex.tv account ids (the Owner's too, unlike Plex).
+
+    Reads from the day before the last sync (Tautulli filters by whole days, in its own time zone); rows already kept are
+    left. Raises GatewayError if Tautulli can't be read; nothing is stored then.
+    """
+    synced = store.skips_synced(account_id)
+    rows = gateway.tautulli_history(url, api_key, account_id, synced and (synced - timedelta(days=1)).date())
+    # shortcut: Skips aren't re-linked by guid when a rating key changes, as Plays are; add it if rescans lose Skips
+    skips = [
+        (r.row_id, Skip(r.started_at, r.rating_key, getattr(library.tracks.get(r.rating_key), "guid", None),
+                        r.title, r.artist, r.album_artist, r.album, r.percent_complete))
+        for r in rows
+        if r.percent_complete < SKIP_BELOW
+    ]
+    store.add_skips(account_id, skips, now)

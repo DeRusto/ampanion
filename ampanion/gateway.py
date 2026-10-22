@@ -6,7 +6,7 @@ Each operation raises a GatewayError subclass the caller can tell apart.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Protocol
 from urllib.parse import quote
 from xml.etree import ElementTree
@@ -105,6 +105,20 @@ class LibraryTrack:
 
 
 @dataclass(frozen=True)
+class TautulliRow:
+    """One track row of Tautulli's history, with the track as it was named then."""
+
+    row_id: int
+    rating_key: str
+    started_at: datetime
+    title: str
+    artist: str
+    album_artist: str
+    album: str
+    percent_complete: int
+
+
+@dataclass(frozen=True)
 class PlexPlaylist:
     id: str
     title: str
@@ -176,6 +190,14 @@ class Gateway(Protocol):
         ...
 
     def set_playlist_summary(self, url: str, token: str, playlist_id: str, summary: str) -> None: ...
+
+    def tautulli_identity(self, url: str, api_key: str) -> str:
+        """The machineIdentifier of the Plex server the Tautulli at url watches. Any failure raises Unreachable."""
+        ...
+
+    def tautulli_history(self, url: str, api_key: str, user_id: int, after: date | None) -> list[TautulliRow]:
+        """Tautulli's ungrouped track rows for a plex.tv user id, all or started on or after a day, newest first."""
+        ...
 
 
 def _metadata_uri(machine_id: str, rating_keys: list[str]) -> str:
@@ -388,3 +410,49 @@ class PlexGateway:
 
     def set_playlist_summary(self, url: str, token: str, playlist_id: str, summary: str) -> None:
         self._pms("PUT", url, f"/playlists/{quote(playlist_id)}", token, {"summary": summary})
+
+    # --- Tautulli: read commands only, as its API key is an admin key that can delete history ---
+
+    def _tautulli(self, url: str, api_key: str, cmd: str, **params):
+        try:
+            # The key goes in the header, never the query string, which would land in logs.
+            response = self._http.get(f"{url.rstrip('/')}/api/v2", params={"cmd": cmd, **params}, headers={"X-Api-Key": api_key})
+            envelope = response.json()["response"]
+        except (httpx.HTTPError, ValueError, KeyError, TypeError) as e:
+            raise Unreachable(f"Tautulli: {e}") from e
+        if response.is_error or envelope.get("result") != "success":
+            raise Unreachable(f"Tautulli answered {response.status_code}: {envelope.get('message') or 'error'}")
+        return envelope.get("data")
+
+    def tautulli_identity(self, url: str, api_key: str) -> str:
+        try:
+            return self._tautulli(url, api_key, "get_server_identity")["machine_identifier"]
+        except (KeyError, TypeError) as e:
+            raise Unreachable(f"Tautulli answered without a server identity: {e}") from e
+
+    def tautulli_history(self, url: str, api_key: str, user_id: int, after: date | None) -> list[TautulliRow]:
+        # grouping=0 always: the server default may merge sessions into one row.
+        params = {"media_type": "track", "user_id": user_id, "grouping": 0, "include_activity": 0, "order_column": "date", "order_dir": "desc"}
+        if after is not None:
+            params["after"] = after.isoformat()  # inclusive, by day
+        rows, size = [], 1000
+        while True:
+            body = self._tautulli(url, api_key, "get_history", **params, start=len(rows), length=size) or {}
+            batch = body.get("data", [])
+            rows += batch
+            if len(batch) < size or len(rows) >= body.get("recordsFiltered", len(rows) + 1):
+                break
+        return [
+            TautulliRow(
+                row_id=int(r["row_id"]),
+                rating_key=str(r["rating_key"]),
+                started_at=datetime.fromtimestamp(r["started"], timezone.utc),
+                title=r.get("title", ""),
+                artist=r.get("original_title") or r.get("grandparent_title", ""),
+                album_artist=r.get("grandparent_title", ""),
+                album=r.get("parent_title", ""),
+                percent_complete=int(r.get("percent_complete") or 0),
+            )
+            for r in rows
+            if r.get("row_id") is not None and r.get("rating_key") not in (None, "")
+        ]

@@ -7,9 +7,13 @@ from ampanion.mixes.rule import Mix, MixInput, Setting
 
 
 def rule(mix: MixInput) -> dict[str | None, list[str]]:
-    """Library tracks by a Top Artist with at most 1 Play ever, picked at random, capped per artist and spread out."""
+    """Library tracks by a Top Artist with at most 1 Play ever, not often skipped, picked at random, capped and spread."""
     top, plays, tracks = set(top_artists(mix)), Counter(p.rating_key for p in mix.plays), mix.library.tracks
-    cuts = [k for k, t in tracks.items() if t.album_artist in top and plays[k] <= 1 and not mix.ratings.excludes(t)]
+    skipped = mix.often_skipped()
+    cuts = [
+        k for k, t in tracks.items()
+        if t.album_artist in top and plays[k] <= 1 and k not in skipped and not mix.ratings.excludes(t)
+    ]
 
     def artist_of(key: str) -> str:
         return tracks[key].album_artist

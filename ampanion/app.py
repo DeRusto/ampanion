@@ -2,7 +2,9 @@ from datetime import timezone, tzinfo
 from pathlib import Path
 from random import Random
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from urllib.parse import urlsplit
+
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -84,7 +86,7 @@ def create_app(
                 choose(store, gateway, servers[0])
         checklist = {
             "server": store.server_machine_id is not None and not store.owner_token_expired,
-            "tautulli": False,  # shortcut: Tautulli isn't connectable yet, its ticket ticks this
+            "tautulli": store.tautulli_url is not None,
             "listener": bool(store.listeners()),
         }
         context = {
@@ -98,10 +100,39 @@ def create_app(
         }
         return templates.TemplateResponse(request, "home.html", context)
 
+    def settings_page(request: Request, status_code: int = 200, **extra):
+        context = {"page": "settings", "store": store, "mixes": MIXES.values()} | extra
+        return templates.TemplateResponse(request, "settings.html", context, status_code=status_code)
+
     @app.get("/settings")
     def settings(request: Request):
-        context = {"page": "settings", "store": store, "mixes": MIXES.values()}
-        return templates.TemplateResponse(request, "settings.html", context)
+        return settings_page(request)
+
+    @app.post("/settings/tautulli")
+    def connect_tautulli(request: Request, url: str = Form(""), api_key: str = Form("")):
+        """Test, then save: only a Tautulli watching the chosen Plex server is kept. A blank key keeps the saved one."""
+        url, api_key = url.strip(), api_key.strip() or store.tautulli_api_key or ""
+        if urlsplit(url).scheme not in ("http", "https") or not urlsplit(url).netloc:
+            error = "The Tautulli URL must start with http:// or https://"
+        elif not api_key:
+            error = "Enter Tautulli's API key"
+        elif store.server_machine_id is None:
+            error = "Choose the Plex server first"
+        else:
+            try:
+                same = gateway.tautulli_identity(url, api_key) == store.server_machine_id
+                error = None if same else "That Tautulli isn't for this Plex server"
+            except GatewayError as e:
+                error = f"Couldn't reach Tautulli with that URL and API key ({e})"
+        if error:
+            return settings_page(request, 400, tautulli_error=error, tautulli_url=url)
+        store.set_tautulli(url, api_key)
+        return RedirectResponse("/settings", 303)
+
+    @app.post("/settings/tautulli/remove")
+    def remove_tautulli():
+        store.set_tautulli(None, None)  # Skips already synced stay, unused until Tautulli is connected again
+        return RedirectResponse("/settings", 303)
 
     @app.get("/settings/reset")
     def confirm_reset(request: Request):

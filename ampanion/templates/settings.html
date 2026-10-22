@@ -24,6 +24,30 @@
   </form>
 </section>
 <section>
+  <h2>Tautulli (optional)</h2>
+  <p>Tautulli adds Skips: tracks skipped twice or more are left out of every Mix but On Repeat.</p>
+  {% if store.tautulli_url %}
+  <p>Connected: <b>{{ store.tautulli_url }}</b>, API key ending {{ store.tautulli_api_key[-4:] }}</p>
+  {% endif %}
+  {% if tautulli_error %}<p class="error" role="alert">{{ tautulli_error }}</p>{% endif %}
+  <form method="post" action="/settings/tautulli">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Tautulli URL
+      <input type="url" name="url" value="{{ tautulli_url or store.tautulli_url or '' }}" placeholder="http://192.168.1.20:8181" required>
+    </label>
+    <label>API key{% if store.tautulli_api_key %} (leave blank to keep the saved one){% endif %}
+      <input type="password" name="api_key" autocomplete="off">
+    </label>
+    <button type="submit">Test and save</button>
+  </form>
+  {% if store.tautulli_url %}
+  <form method="post" action="/settings/tautulli/remove">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Remove Tautulli</button>
+  </form>
+  {% endif %}
+</section>
+<section>
   <h2>Schedule</h2>
   <form method="post" action="/settings/schedule">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

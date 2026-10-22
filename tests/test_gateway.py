@@ -1,6 +1,6 @@
 """The Gateway's contract: the fake and the real one must agree on results and typed errors."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 import httpx
 import pytest
@@ -14,6 +14,7 @@ from ampanion.gateway import (
     PlexGateway,
     PlexPlaylist,
     PlexResource,
+    TautulliRow,
     TokenExpired,
     Unreachable,
 )
@@ -324,3 +325,67 @@ def test_the_token_accounts_audio_playlists_are_listed_and_deleted():
     assert fake.playlists(URL, "owner-token") == []
     with pytest.raises(NotFound):
         fake.delete_playlist(URL, "owner-token", playlist_id)
+
+
+def tautulli(routes) -> tuple[PlexGateway, list[httpx.Request]]:
+    """A Tautulli answering `routes(request)` with (status, envelope data, or None for an error envelope)."""
+    requests = []
+
+    def handle(request):
+        requests.append(request)
+        status, data = routes(request)
+        result = "success" if data is not None else "error"
+        return httpx.Response(status, json={"response": {"result": result, "message": None, "data": data}})
+
+    return PlexGateway(client_identifier="test-client", http=httpx.Client(transport=httpx.MockTransport(handle))), requests
+
+
+def test_tautulli_names_its_plex_server_with_the_key_only_in_the_header():
+    real, requests = tautulli(lambda r: (200, {"machine_identifier": "machine-1"}))
+
+    assert real.tautulli_identity("http://tautulli:8181/root/", "key-123") == "machine-1"
+    assert requests[0].url.path == "/root/api/v2" and requests[0].url.params["cmd"] == "get_server_identity"
+    assert requests[0].headers["X-Api-Key"] == "key-123" and "key-123" not in str(requests[0].url)
+
+    fake = FakeGateway()
+    fake.add_tautulli("http://tautulli:8181", "key-123", "machine-1")
+    assert fake.tautulli_identity("http://tautulli:8181", "key-123") == "machine-1"
+
+
+def test_tautulli_failures_are_unreachable_never_token_expiry():
+    for status, data in ((401, None), (200, None), (500, {})):
+        real, _ = tautulli(lambda r: (status, data))
+        with pytest.raises(Unreachable):
+            real.tautulli_identity("http://tautulli:8181", "key")
+
+    fake = FakeGateway()
+    fake.add_tautulli("http://tautulli:8181", "key", "machine-1")
+    with pytest.raises(Unreachable):
+        fake.tautulli_identity("http://tautulli:8181", "wrong")
+
+
+def test_tautulli_history_reads_ungrouped_track_rows_for_a_user_after_a_date_in_pages():
+    rows = [
+        {"row_id": n, "rating_key": n, "started": 1767614400 - n, "title": f"S{n}", "original_title": "",
+         "grandparent_title": "AA", "parent_title": "Al", "percent_complete": 20}
+        for n in range(2500)
+    ]
+
+    def page(request):
+        start, length = int(request.url.params["start"]), int(request.url.params["length"])
+        return 200, {"recordsFiltered": len(rows), "data": rows[start : start + length]}
+
+    real, requests = tautulli(page)
+
+    got = real.tautulli_history("http://tautulli:8181", "key", 42, after=date(2026, 1, 1))
+
+    assert len(got) == 2500 and got[0] == TautulliRow(
+        0, "0", datetime(2026, 1, 5, 12, tzinfo=timezone.utc), "S0", "AA", "AA", "Al", 20
+    )
+    params = requests[0].url.params
+    assert (params["cmd"], params["media_type"], params["user_id"], params["grouping"], params["after"]) == (
+        "get_history", "track", "42", "0", "2026-01-01"
+    )
+    assert {r.url.params["cmd"] for r in requests} == {"get_history"}  # read commands only
+    real.tautulli_history("http://tautulli:8181", "key", 42, after=None)
+    assert "after" not in requests[-1].url.params

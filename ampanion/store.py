@@ -32,6 +32,23 @@ CREATE TABLE IF NOT EXISTS plays (
     album        TEXT NOT NULL,
     PRIMARY KEY (account_id, history_key)
 );
+CREATE TABLE IF NOT EXISTS skips (
+    account_id       INTEGER NOT NULL,
+    row_id           INTEGER NOT NULL,  -- Tautulli's row id
+    started_at       TEXT NOT NULL,     -- in the key too: a reinstalled Tautulli numbers its rows from 1 again
+    rating_key       TEXT NOT NULL,
+    guid             TEXT,
+    title            TEXT NOT NULL,
+    artist           TEXT NOT NULL,
+    album_artist     TEXT NOT NULL,
+    album            TEXT NOT NULL,
+    percent_complete INTEGER NOT NULL,
+    PRIMARY KEY (account_id, row_id, started_at)
+);
+CREATE TABLE IF NOT EXISTS skip_syncs (
+    account_id INTEGER PRIMARY KEY,
+    synced_at  TEXT NOT NULL  -- the last Skip sync from Tautulli, where the next one picks up
+);
 CREATE TABLE IF NOT EXISTS mix_settings (
     account_id INTEGER NOT NULL,
     mix        TEXT NOT NULL,
@@ -82,6 +99,18 @@ class Play:
     artist: str
     album_artist: str
     album: str
+
+
+@dataclass(frozen=True)
+class Skip:
+    started_at: datetime
+    rating_key: str
+    guid: str | None
+    title: str
+    artist: str
+    album_artist: str
+    album: str
+    percent_complete: int
 
 
 @dataclass(frozen=True)
@@ -218,6 +247,22 @@ class Store:
         with self.connect() as db:
             db.execute("INSERT OR REPLACE INTO app_settings VALUES ('server_manual_url', ?)", (url or "",))
 
+    @property
+    def tautulli_url(self) -> str | None:
+        return self._setting("tautulli_url")
+
+    @property
+    def tautulli_api_key(self) -> str | None:
+        """Tautulli's admin API key: a secret, never logged or sent to the browser in full."""
+        return self._setting("tautulli_api_key")
+
+    def set_tautulli(self, url: str | None, api_key: str | None) -> None:
+        """Save Tautulli, or forget it with None. Skips already synced are kept."""
+        with self.connect() as db:
+            db.execute("DELETE FROM app_settings WHERE key IN ('tautulli_url', 'tautulli_api_key')")
+            if url:
+                db.executemany("INSERT INTO app_settings VALUES (?, ?)", [("tautulli_url", url), ("tautulli_api_key", api_key)])
+
     # --- Schedule ---
 
     @property
@@ -273,7 +318,7 @@ class Store:
     def remove_listener(self, account_id: int) -> None:
         """Forget everything stored for the Listener. Later tables (Plays, Skips, Mix settings...) are deleted here too."""
         with self.connect() as db:
-            for table in ("listeners", "plays", "mix_settings", "managed_playlists", "mix_builds", "refreshes"):
+            for table in ("listeners", "plays", "skips", "skip_syncs", "mix_settings", "managed_playlists", "mix_builds", "refreshes"):
                 db.execute(f"DELETE FROM {table} WHERE account_id = ?", (account_id,))
 
     # --- Listening history ---
@@ -304,6 +349,31 @@ class Store:
     def relink_plays(self, account_id: int, guid: str, rating_key: str) -> None:
         with self.connect() as db:
             db.execute("UPDATE plays SET rating_key = ? WHERE account_id = ? AND guid = ?", (rating_key, account_id, guid))
+
+    def add_skips(self, account_id: int, skips: list[tuple[int, Skip]], synced_at: datetime) -> None:
+        """Insert (Tautulli row id, Skip) pairs, leaving ones already stored, and note when this sync ran."""
+        with self.connect() as db:
+            db.executemany(
+                "INSERT OR IGNORE INTO skips VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    (account_id, row_id, s.started_at.isoformat(), s.rating_key, s.guid, s.title, s.artist, s.album_artist, s.album, s.percent_complete)
+                    for row_id, s in skips
+                ],
+            )
+            db.execute("INSERT OR REPLACE INTO skip_syncs VALUES (?, ?)", (account_id, synced_at.isoformat()))
+
+    def skips_synced(self, account_id: int) -> datetime | None:
+        with self.connect() as db:
+            row = db.execute("SELECT synced_at FROM skip_syncs WHERE account_id = ?", (account_id,)).fetchone()
+        return datetime.fromisoformat(row[0]) if row else None
+
+    def skips(self, account_id: int) -> list[Skip]:
+        with self.connect() as db:
+            rows = db.execute(
+                "SELECT started_at, rating_key, guid, title, artist, album_artist, album, percent_complete FROM skips WHERE account_id = ?",
+                (account_id,),
+            ).fetchall()
+        return [Skip(datetime.fromisoformat(r[0]), *r[1:]) for r in rows]
 
     # --- Mixes and their Playlists ---
 

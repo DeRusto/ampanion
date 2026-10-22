@@ -20,14 +20,14 @@ def top_genres(mix: MixInput, count: int) -> list[str]:
 
 
 def rule(mix: MixInput) -> dict[str | None, list[str]]:
-    tracks = mix.library.tracks
+    tracks, skipped = mix.library.tracks, mix.often_skipped()
 
     def artist_of(key: str) -> str:
         return tracks[key].album_artist
 
     playlists = {}
     for genre in top_genres(mix, mix.settings["count"]):
-        pool = [k for k, t in tracks.items() if genre in t.genres and not mix.ratings.excludes(t)]
+        pool = [k for k, t in tracks.items() if genre in t.genres and k not in skipped and not mix.ratings.excludes(t)]
         # pick_capped draws from a shuffled pool, so its pick is already in random order.
         playlists[genre] = pick_capped(pool, artist_of, mix.settings["length"], mix.settings["tracks_per_artist"], mix.rng)
     return playlists

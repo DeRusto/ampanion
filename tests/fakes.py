@@ -3,7 +3,7 @@
 import itertools
 from collections import defaultdict
 from dataclasses import dataclass, field, replace
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from ampanion.gateway import (
     HistoryEntry,
@@ -14,6 +14,7 @@ from ampanion.gateway import (
     PlexConnection,
     PlexPlaylist,
     PlexResource,
+    TautulliRow,
     TokenExpired,
     Unreachable,
 )
@@ -52,6 +53,11 @@ class FakeGateway:
         self.item_batches: dict[str, list[int]] = defaultdict(list)  # token -> size of each create/add call
         self.history_down = False
         self.rejected_tokens: set[str] = set()  # tokens the Plex server answers 401 to, e.g. a revoked share token
+        # Tautulli: where it answers, its API key and the Plex server it watches; its track history by plex.tv user id.
+        self._tautulli: dict[str, tuple[str, str]] = {}
+        self._tautulli_rows: list[tuple[int, TautulliRow]] = []
+        self._tautulli_row_ids = itertools.count(1)
+        self.tautulli_queries: list[tuple[int, date | None]] = []  # (user id, after) of each history read
 
     # --- set up the world ---
 
@@ -157,6 +163,25 @@ class FakeGateway:
     def clear_history(self, account_id: int) -> None:
         """An admin deletes the account's history in Plex."""
         self._history = [(a, e) for a, e in self._history if a != account_id]
+
+    def add_tautulli(self, url: str, api_key: str, machine_id: str) -> None:
+        """A Tautulli answering at url to api_key, watching the Plex server machine_id."""
+        self._tautulli[url] = (api_key, machine_id)
+
+    def stop_tautulli(self, url: str) -> None:
+        del self._tautulli[url]
+
+    def tautulli_listen(self, user_id: int, rating_key: str, at: datetime, percent: int) -> None:
+        """The plex.tv account user_id listens to percent of the track; Tautulli logs a row."""
+        track = self._tracks[rating_key]
+        row = TautulliRow(
+            next(self._tautulli_row_ids), rating_key, at, track.title, track.artist, track.album_artist, track.album, percent
+        )
+        self._tautulli_rows.append((user_id, row))
+
+    def reset_tautulli(self) -> None:
+        """Tautulli's history is wiped (or it is reinstalled): its rows are gone and row ids start over."""
+        self._tautulli_rows, self._tautulli_row_ids = [], itertools.count(1)
 
     def rate(self, token: str, rating_key: str, stars: float) -> None:
         self._ratings[token][rating_key] = stars * 2
@@ -265,6 +290,23 @@ class FakeGateway:
     def set_playlist_summary(self, url: str, token: str, playlist_id: str, summary: str) -> None:
         self._server_token(token)
         self._playlist(token, playlist_id).summary = summary
+
+    def _tautulli_answering(self, url: str, api_key: str) -> str:
+        if url not in self._tautulli:
+            raise Unreachable(f"Tautulli at {url}: connection refused")
+        key, machine_id = self._tautulli[url]
+        if api_key != key:
+            raise Unreachable("Tautulli answered 401")
+        return machine_id
+
+    def tautulli_identity(self, url: str, api_key: str) -> str:
+        return self._tautulli_answering(url, api_key)
+
+    def tautulli_history(self, url: str, api_key: str, user_id: int, after: date | None) -> list[TautulliRow]:
+        self._tautulli_answering(url, api_key)
+        self.tautulli_queries.append((user_id, after))
+        rows = [r for u, r in self._tautulli_rows if u == user_id and (after is None or r.started_at.date() >= after)]
+        return sorted(rows, key=lambda r: r.started_at, reverse=True)
 
 
 class FakeClock:

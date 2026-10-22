@@ -15,8 +15,8 @@ def rule(mix: MixInput) -> dict[str | None, list[str]]:
         plays[p.rating_key] += 1
         latest[p.rating_key] = max(latest.get(p.rating_key, p.played_at), p.played_at)
     played_artists = {p.album_artist for p in mix.plays} - {VARIOUS}
-    tracks, previous = mix.library.tracks, set(mix.previous.get(None, []))
-    allowed = [k for k, t in tracks.items() if k not in previous and not mix.ratings.excludes(t)]
+    tracks, excluded = mix.library.tracks, set(mix.previous.get(None, [])) | mix.often_skipped()
+    allowed = [k for k, t in tracks.items() if k not in excluded and not mix.ratings.excludes(t)]
     familiar = [k for k in allowed if plays[k] >= 2]
     fresh = [k for k in allowed if plays[k] == 0 and tracks[k].album_artist in played_artists]
 
