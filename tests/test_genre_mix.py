@@ -57,7 +57,7 @@ def test_one_playlist_per_top_genre_picked_from_the_genre_and_capped_per_artist(
     assert len(items) == 50 and set(items) <= set(rock)
     assert max(artists.count(a) for a in artists) <= 3
     assert len(mixes(gateway)["Jazz Mix"].items) == 30  # 10 artists x 3
-    assert mixes(gateway)["Rock Mix"].summary == "Made by ampanion: Rock Mix. Refreshed daily; edits are replaced."
+    assert mixes(gateway)["Rock Mix"].summary == "Made by ampanion: Rock Mix. Refreshed weekly; edits are replaced."
     assert "Rock Mix: 50 tracks" in client.get("/listeners/8?tab=history").text
 
 

@@ -47,4 +47,5 @@ DAILY_MIXTAPE = Mix(
         Setting("tracks_per_artist", "Tracks per artist", 2),
         Setting("fresh_share", "Fresh share (%)", 40, min=0, max=100),
     ),
+    cadence="daily",
 )

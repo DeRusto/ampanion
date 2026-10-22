@@ -4,7 +4,7 @@ from dataclasses import replace
 from datetime import datetime
 
 from ampanion.gateway import Gateway, NotFound
-from ampanion.mixes import Mix
+from ampanion.mixes import Mix, mix_cadence
 from ampanion.store import ManagedPlaylist, Store
 
 MIN_TRACKS = 5
@@ -22,9 +22,13 @@ def playlist_title(mix: Mix, genre: str | None) -> str:
     return mix.title if genre is None else f"{genre} Mix"
 
 
-def summary_marker(title: str) -> str:
-    # shortcut: always says "daily", the scheduling ticket (#34) names the Mix's cadence
-    return f"Made by ampanion: {title}. Refreshed daily; edits are replaced."
+def marker_name(title: str) -> str:
+    """The part of the summary marker naming the Mix (and genre): what takeover matches, whatever the cadence."""
+    return f"Made by ampanion: {title}."
+
+
+def summary_marker(title: str, cadence: str) -> str:
+    return f"{marker_name(title)} Refreshed {cadence}; edits are replaced."
 
 
 def publish(
@@ -42,10 +46,10 @@ def publish(
         store.save_managed_playlist(account_id, kept)
         return status
     title = playlist_title(mix, genre)
-    marker = summary_marker(title)
+    marker, name = summary_marker(title, mix_cadence(store, mix)), marker_name(title)
     stored_id = managed.playlist_id if managed else None
     if stored_id is None:  # e.g. /config was lost: take over the Listener's Playlist still carrying this marker
-        playlist_id = next((p.id for p in gateway.playlists(url, token) if p.summary == marker), None)
+        playlist_id = next((p.id for p in gateway.playlists(url, token) if p.summary.startswith(name + " ")), None)
     else:
         playlist_id = stored_id if gateway.playlist(url, token, stored_id) is not None else None
     if playlist_id:

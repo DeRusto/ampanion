@@ -58,7 +58,7 @@ def test_deep_cuts_are_rarely_played_tracks_by_top_artists_capped_per_artist_and
         assert max(artists.count(a) for a in artists) <= 3
         assert not {k for k in items if k.endswith("-0")} and "Band0-2" not in items
         assert all(a != b for a, b in zip(artists, artists[1:]))
-    assert deep_cuts(gateway).summary == "Made by ampanion: Deep Cuts. Refreshed daily; edits are replaced."
+    assert deep_cuts(gateway).summary == "Made by ampanion: Deep Cuts. Refreshed weekly; edits are replaced."
 
 
 def test_top_artists_are_the_top_15_by_all_time_plays_with_at_least_10(client, gateway, clock, pal):

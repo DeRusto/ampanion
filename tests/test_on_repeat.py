@@ -28,9 +28,18 @@ def listen(gateway, clock, account_id, key, times, days_ago=1):
         gateway.play(account_id, key, at=clock.now() - timedelta(days=days_ago, minutes=i))
 
 
+def background(client):
+    """Run the scheduler's pending background work (a real app does this on its own thread)."""
+    client.app.state.scheduler.tick()
+
+
 def refresh(client, account_id=8):
+    """Press Refresh now once any background Refresh has finished, and let it run."""
+    background(client)
     csrf = csrf_from(client.get(f"/listeners/{account_id}").text)
-    return client.post(f"/listeners/{account_id}/refresh", data={"csrf_token": csrf})
+    response = client.post(f"/listeners/{account_id}/refresh", data={"csrf_token": csrf})
+    background(client)
+    return response
 
 
 def on_repeat(gateway, token=PAL):

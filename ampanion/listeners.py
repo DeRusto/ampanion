@@ -14,6 +14,7 @@ from ampanion.clock import Clock
 from ampanion.gateway import Gateway, GatewayError, PlexAccount
 from ampanion.mixes import MIXES, mix_config
 from ampanion.publisher import delete_playlists, on_plex
+from ampanion.schedule import Scheduler
 from ampanion.store import Store
 
 NO_SHARE = "No library share on this server"
@@ -63,7 +64,9 @@ def sidebar_users(store: Store, gateway: Gateway) -> tuple[list[SidebarUser], st
     return users, error
 
 
-def add_listener_routes(app: FastAPI, *, store: Store, gateway: Gateway, clock: Clock, templates: Jinja2Templates):
+def add_listener_routes(
+    app: FastAPI, *, store: Store, gateway: Gateway, clock: Clock, templates: Jinja2Templates, scheduler: Scheduler
+):
     def listener_or_404(account_id: int):
         listener = store.listener(account_id)
         if listener is None:
@@ -96,7 +99,7 @@ def add_listener_routes(app: FastAPI, *, store: Store, gateway: Gateway, clock: 
         if user is None:
             raise HTTPException(400, NO_SHARE)
         store.add_listener(user.id, user.username, clock.now())
-        # shortcut: no Refresh on add yet, the Refresh runner ticket starts one here
+        scheduler.request([user.id])  # their first Refresh, with the full first fill of their history
         return RedirectResponse(f"/listeners/{user.id}", 303)
 
     @app.get("/listeners/{account_id}")
@@ -134,13 +137,15 @@ def add_listener_routes(app: FastAPI, *, store: Store, gateway: Gateway, clock: 
             if not s.min <= value <= s.max:
                 raise HTTPException(400, f"{s.label} must be between {s.min} and {s.max}")
             settings[s.key] = value
-        enabled = form.get("enabled") == "on"
+        was_enabled, enabled = mix_config(store, account_id, mix)[0], form.get("enabled") == "on"
         if not enabled and on_plex(store, account_id, mix.key):
             if form.get("confirm") != "yes":
                 context = {"page": "listener", "listener": listener_or_404(account_id), "mix": mix, "settings": settings}
                 return templates.TemplateResponse(request, "mix_off.html", context)
             delete_from_plex(account_id, [mix.key])
         store.set_mix_settings(account_id, mix.key, enabled, settings)
+        if enabled and not was_enabled:
+            scheduler.request([account_id])
         return RedirectResponse(f"/listeners/{account_id}", 303)
 
     @app.get("/listeners/{account_id}/turn-off")

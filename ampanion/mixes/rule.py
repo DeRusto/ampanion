@@ -42,3 +42,4 @@ class Mix:
     title: str  # the Mix's name, and its Playlist's title
     rule: Rule
     settings: tuple[Setting, ...]  # every Mix has a "length" setting, which status lines compare against
+    cadence: str = "weekly"  # the default server-wide cadence, "daily" or "weekly" (on Mondays)

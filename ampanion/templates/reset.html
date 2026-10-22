@@ -6,7 +6,8 @@
   Playlists already on Plex are left in place: choose the same server again and ampanion takes them back over.</p>
 <form method="post" action="/settings/reset">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <button type="submit" class="danger">Reset ampanion</button>
+  <button type="submit" class="danger"{% if scheduler.busy %} disabled{% endif %}>Reset ampanion</button>
+  {% if scheduler.busy %}<span class="progress" role="status">Wait for the Refresh to finish: {{ scheduler.progress }}</span>{% endif %}
   <a href="/settings">Cancel</a>
 </form>
 {% endblock %}

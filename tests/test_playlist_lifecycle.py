@@ -71,6 +71,16 @@ def test_a_playlist_whose_marker_was_changed_is_not_taken_over(client, gateway, 
     assert new.items == ["t1", "t2", "t3", "t4", "t5"]
 
 
+def test_takeover_matches_the_mix_whatever_cadence_the_marker_names(client, gateway, clock, pal):
+    weekly = leftover(gateway, "On Repeat", MARKER.replace("daily", "weekly"))  # the cadence was weekly back then
+    five_plays(gateway, clock)
+
+    refresh(client)
+
+    assert [p.id for p in gateway.playlists_of(PAL) if p.title == "On Repeat"] == [weekly]
+    assert on_repeat(gateway).summary == MARKER
+
+
 def mix_off(client, **extra):
     csrf = csrf_from(client.get("/listeners/8").text)
     data = {"csrf_token": csrf, "window_days": "30", "length": "30"} | extra

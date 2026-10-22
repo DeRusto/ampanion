@@ -108,6 +108,11 @@ class FakeGateway:
             self._shared_tokens.setdefault(share.client_identifier, {})[user.id] = f"{username}-server-token"
         return user
 
+    def unshare(self, account_id: int) -> None:
+        """The Owner stops sharing the server with the account."""
+        for tokens in self._shared_tokens.values():
+            tokens.pop(account_id, None)
+
     def approve_pin(self, code: str, token: str) -> None:
         """The person signs in on Plex's auth page, which attaches their token to the PIN."""
         self.pin_by_code(code).token = token

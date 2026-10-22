@@ -1,24 +1,24 @@
-"""Refresh runner: one Refresh per Listener. Sync history, read Ratings, then compute and publish every enabled Mix.
+"""Refresh runner: one Refresh per Listener. Sync history, read Ratings, then compute and publish every enabled, due Mix.
 
-shortcut: runs synchronously in the request, with no run lock or schedule; the scheduling ticket (#34) adds both.
+When Refreshes run, and one run at a time, is the scheduler's job (ampanion/schedule.py).
 """
 
 import logging
+from collections.abc import Callable
+from datetime import timedelta
 from random import Random
-
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import RedirectResponse
 
 from ampanion import history
 from ampanion.clock import Clock
 from ampanion.gateway import Gateway, GatewayError
 from ampanion.library import LibraryIndex, Ratings
-from ampanion.mixes import MIXES, MixInput, mix_config
+from ampanion.mixes import MIXES, Mix, MixInput, mix_config
 from ampanion.publisher import delete_playlists, playlist_title, publish
 from ampanion.store import Listener, Store
 
 log = logging.getLogger(__name__)
 
+KEEP_REFRESHES = timedelta(days=90)
 OWNER_HISTORY_ACCOUNT = 1  # the Owner's account id in the server's own history, whatever their plex.tv id
 
 
@@ -43,10 +43,18 @@ def listener_token(store: Store, gateway: Gateway, account_id: int) -> str:
     return tokens[account_id]
 
 
-def run(store: Store, gateway: Gateway, clock: Clock, rng: Random, listeners: list[Listener]) -> None:
+Due = Callable[[int, Mix], bool]  # (account id, Mix) -> rebuild it in this Refresh?
+
+
+def run(
+    store: Store, gateway: Gateway, clock: Clock, rng: Random, listeners: list[Listener],
+    due: Due = lambda account_id, mix: True, on_listener: Callable[[int, Listener], None] = lambda i, listener: None,
+) -> None:
     """Refresh each Listener in turn, writing a Refresh record for each. One Listener's failure doesn't stop the rest."""
+    store.prune_refreshes(clock.now() - KEEP_REFRESHES)
     library = None
-    for listener in listeners:
+    for i, listener in enumerate(listeners):
+        on_listener(i, listener)
         record = store.start_refresh(listener.account_id, clock.now())
         mixes, error = [], None
         try:
@@ -54,7 +62,7 @@ def run(store: Store, gateway: Gateway, clock: Clock, rng: Random, listeners: li
                 raise RefreshFailed("ampanion can't reach the Plex server")
             if library is None:  # loaded once per run and shared by every Listener in it
                 library = step("Couldn't read the music library from Plex", LibraryIndex.load, gateway, store.server_url, store.owner_token)
-            mixes = refresh_listener(store, gateway, clock, rng, listener, library)
+            mixes = refresh_listener(store, gateway, clock, rng, listener, library, due)
         except RefreshFailed as e:
             error = str(e)
         except Exception as e:  # never leave a record stuck on "refreshing"
@@ -65,7 +73,7 @@ def run(store: Store, gateway: Gateway, clock: Clock, rng: Random, listeners: li
 
 
 def refresh_listener(
-    store: Store, gateway: Gateway, clock: Clock, rng: Random, listener: Listener, library: LibraryIndex
+    store: Store, gateway: Gateway, clock: Clock, rng: Random, listener: Listener, library: LibraryIndex, due: Due
 ) -> list[dict]:
     url, account_id = store.server_url, listener.account_id
     token = listener_token(store, gateway, account_id)
@@ -83,7 +91,7 @@ def refresh_listener(
     outcomes = []
     for mix in MIXES.values():
         enabled, settings = mix_config(store, account_id, mix)
-        if not enabled:
+        if not enabled or not due(account_id, mix):
             continue
         try:
             previous = {p.genre: p.tracks for p in store.managed_playlists(account_id, mix.key)}
@@ -97,18 +105,9 @@ def refresh_listener(
                 outcomes.append({"mix": mix.key, "outcome": "ok", "detail": f"{playlist_title(mix, genre)}: {status}"})
             if dropped := previous.keys() - playlists.keys():  # e.g. a genre no longer a Top Genre
                 delete_playlists(gateway, store, url=url, token=token, account_id=account_id, mix_key=mix.key, genres=dropped)
+            store.set_mix_built(account_id, mix.key, clock.now())
         except Exception as e:
             if not isinstance(e, GatewayError):
                 log.exception("%s for %s failed", mix.title, listener.name)
             outcomes.append({"mix": mix.key, "outcome": "failed", "detail": f"{mix.title}: failed ({e})"})
     return outcomes
-
-
-def add_refresh_routes(app: FastAPI, *, store: Store, gateway: Gateway, clock: Clock, rng: Random):
-    @app.post("/listeners/{account_id}/refresh")
-    def refresh_now(account_id: int):
-        listener = store.listener(account_id)
-        if listener is None:
-            raise HTTPException(404, "Not a Listener")
-        run(store, gateway, clock, rng, [listener])
-        return RedirectResponse(f"/listeners/{account_id}", 303)

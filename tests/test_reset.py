@@ -1,7 +1,7 @@
 """Reset ampanion: Settings wipes everything ampanion stored and returns it to first run, leaving Plex alone."""
 
 from tests.test_listeners import add_listener
-from tests.test_on_repeat import PAL, listen, on_repeat, pal, refresh  # noqa: F401 (pal is a fixture)
+from tests.test_on_repeat import PAL, background, listen, on_repeat, pal, refresh  # noqa: F401 (pal is a fixture)
 from tests.test_sign_in import csrf_from
 
 
@@ -13,6 +13,7 @@ def published(client, gateway, clock):
 
 
 def reset(client):
+    background(client)  # Reset waits for any Refresh to finish
     page = client.get("/settings/reset")
     return client.post("/settings/reset", data={"csrf_token": csrf_from(page.text)}, follow_redirects=False)
 

@@ -7,7 +7,7 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, time
 from pathlib import Path
 
 SCHEMA = """
@@ -48,6 +48,12 @@ CREATE TABLE IF NOT EXISTS managed_playlists (
     status       TEXT NOT NULL,
     refreshed_at TEXT NOT NULL,
     PRIMARY KEY (account_id, mix, genre)
+);
+CREATE TABLE IF NOT EXISTS mix_builds (
+    account_id INTEGER NOT NULL,
+    mix        TEXT NOT NULL,
+    built_at   TEXT NOT NULL,  -- when the Mix was last rebuilt, which decides when a weekly Mix is due
+    PRIMARY KEY (account_id, mix)
 );
 CREATE TABLE IF NOT EXISTS refreshes (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -201,6 +207,46 @@ class Store:
         with self.connect() as db:
             db.execute("INSERT OR REPLACE INTO app_settings VALUES ('server_manual_url', ?)", (url or "",))
 
+    # --- Schedule ---
+
+    @property
+    def run_time(self) -> time:
+        """The nightly run's local time (in TZ)."""
+        return time.fromisoformat(self._setting("run_time") or "04:00")
+
+    def set_run_time(self, run_time: time) -> None:
+        with self.connect() as db:
+            db.execute("INSERT OR REPLACE INTO app_settings VALUES ('run_time', ?)", (run_time.strftime("%H:%M"),))
+
+    def cadence(self, mix: str) -> str | None:
+        """The Mix's server-wide cadence, "daily" or "weekly", if the Owner has set one."""
+        return self._setting(f"cadence.{mix}")
+
+    def set_cadence(self, mix: str, cadence: str) -> None:
+        with self.connect() as db:
+            db.execute("INSERT OR REPLACE INTO app_settings VALUES (?, ?)", (f"cadence.{mix}", cadence))
+
+    @property
+    def last_slot(self) -> datetime | None:
+        """The latest nightly slot that has had its run (or needed none)."""
+        value = self._setting("last_slot")
+        return datetime.fromisoformat(value) if value else None
+
+    def set_last_slot(self, slot: datetime) -> None:
+        with self.connect() as db:
+            db.execute("INSERT OR REPLACE INTO app_settings VALUES ('last_slot', ?)", (slot.isoformat(),))
+
+    def mix_built(self, account_id: int, mix: str) -> datetime | None:
+        with self.connect() as db:
+            row = db.execute(
+                "SELECT built_at FROM mix_builds WHERE account_id = ? AND mix = ?", (account_id, mix)
+            ).fetchone()
+        return datetime.fromisoformat(row[0]) if row else None
+
+    def set_mix_built(self, account_id: int, mix: str, built_at: datetime) -> None:
+        with self.connect() as db:
+            db.execute("INSERT OR REPLACE INTO mix_builds VALUES (?, ?, ?)", (account_id, mix, built_at.isoformat()))
+
     def listeners(self) -> list[Listener]:
         with self.connect() as db:
             rows = db.execute("SELECT account_id, name FROM listeners ORDER BY added_at").fetchall()
@@ -216,7 +262,7 @@ class Store:
     def remove_listener(self, account_id: int) -> None:
         """Forget everything stored for the Listener. Later tables (Plays, Skips, Mix settings...) are deleted here too."""
         with self.connect() as db:
-            for table in ("listeners", "plays", "mix_settings", "managed_playlists", "refreshes"):
+            for table in ("listeners", "plays", "mix_settings", "managed_playlists", "mix_builds", "refreshes"):
                 db.execute(f"DELETE FROM {table} WHERE account_id = ?", (account_id,))
 
     # --- Listening history ---
@@ -306,6 +352,10 @@ class Store:
                 "UPDATE refreshes SET ended_at = ?, outcome = ?, mixes = ?, error = ? WHERE id = ?",
                 (ended_at.isoformat(), outcome, json.dumps(mixes), error, refresh_id),
             )
+
+    def prune_refreshes(self, before: datetime) -> None:
+        with self.connect() as db:
+            db.execute("DELETE FROM refreshes WHERE started_at < ?", (before.isoformat(),))
 
     def refreshes(self, account_id: int | None = None, limit: int = 20) -> list[RefreshRecord]:
         """The newest Refresh records first, all Listeners' or one Listener's."""

@@ -1,7 +1,8 @@
+from datetime import timezone, tzinfo
 from pathlib import Path
 from random import Random
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -11,16 +12,24 @@ from ampanion.auth import PUBLIC_PATHS, SESSION_MAX_AGE, add_sign_in_routes, csr
 from ampanion.clock import Clock
 from ampanion.gateway import Gateway, GatewayError
 from ampanion.listeners import add_listener_routes, sidebar_users
-from ampanion.refresh import add_refresh_routes
+from ampanion.mixes import MIXES, mix_cadence
+from ampanion.schedule import Scheduler, add_schedule_routes
 from ampanion.server import add_server_routes, choose, owned_servers
 from ampanion.store import Store
 
 HERE = Path(__file__).parent
 
 
-def create_app(*, config_dir: Path, gateway: Gateway, clock: Clock, rng: Random) -> FastAPI:
-    """Build ampanion. The Gateway, clock and random generator are injected so tests can fake them."""
+def create_app(
+    *, config_dir: Path, gateway: Gateway, clock: Clock, rng: Random, tz: tzinfo = timezone.utc
+) -> FastAPI:
+    """Build ampanion. The Gateway, clock and random generator are injected so tests can fake them.
+
+    `tz` is the local time zone (TZ). The scheduler's thread isn't started here: the caller runs
+    `app.state.scheduler.serve_forever()` on one, or a test calls `tick()`.
+    """
     store = Store.open(config_dir)
+    scheduler = Scheduler(store, gateway, clock, rng, tz)
 
     def sidebar(request: Request) -> dict:
         if request.url.path in PUBLIC_PATHS or store.server_machine_id is None:
@@ -33,8 +42,10 @@ def create_app(*, config_dir: Path, gateway: Gateway, clock: Clock, rng: Random)
         context_processors=[
             lambda request: {"csrf_token": csrf_token(store.session_secret, request.session)},
             sidebar,
+            lambda request: {"scheduler": scheduler, "cadences": {k: mix_cadence(store, m) for k, m in MIXES.items()}},
         ],
     )
+    templates.env.filters["local"] = lambda dt: dt.astimezone(tz)
 
     app = FastAPI(dependencies=[Depends(session_guard(store))])
     app.add_middleware(
@@ -48,11 +59,12 @@ def create_app(*, config_dir: Path, gateway: Gateway, clock: Clock, rng: Random)
     app.state.gateway = gateway
     app.state.clock = clock
     app.state.rng = rng
+    app.state.scheduler = scheduler
     app.mount("/static", StaticFiles(directory=HERE / "static"), name="static")
     add_sign_in_routes(app, store=store, gateway=gateway, clock=clock, templates=templates)
     add_server_routes(app, store=store, gateway=gateway)
-    add_listener_routes(app, store=store, gateway=gateway, clock=clock, templates=templates)
-    add_refresh_routes(app, store=store, gateway=gateway, clock=clock, rng=rng)
+    add_listener_routes(app, store=store, gateway=gateway, clock=clock, templates=templates, scheduler=scheduler)
+    add_schedule_routes(app, store=store, scheduler=scheduler)
 
     @app.get("/health")
     def health():
@@ -87,7 +99,8 @@ def create_app(*, config_dir: Path, gateway: Gateway, clock: Clock, rng: Random)
 
     @app.get("/settings")
     def settings(request: Request):
-        return templates.TemplateResponse(request, "settings.html", {"page": "settings", "store": store})
+        context = {"page": "settings", "store": store, "mixes": MIXES.values()}
+        return templates.TemplateResponse(request, "settings.html", context)
 
     @app.get("/settings/reset")
     def confirm_reset(request: Request):
@@ -95,7 +108,12 @@ def create_app(*, config_dir: Path, gateway: Gateway, clock: Clock, rng: Random)
 
     @app.post("/settings/reset")
     def reset(request: Request):
-        store.reset()  # Playlists on Plex stay: re-adding a Listener on the same server takes them over by marker
+        def wipe():
+            store.reset()  # Playlists on Plex stay: re-adding a Listener on the same server takes them over by marker
+            scheduler.mark_slot_done()  # like a fresh install, there's no missed run to catch up
+
+        if not scheduler.when_idle(wipe):
+            raise HTTPException(409, "A Refresh is running. Reset once it has finished.")
         request.session.clear()
         return RedirectResponse("/signin", 303)
 
