@@ -70,11 +70,16 @@ def on_plex(store: Store, account_id: int, mix_key: str) -> list[ManagedPlaylist
     return [p for p in store.managed_playlists(account_id, mix_key) if p.playlist_id]
 
 
-def delete_playlists(gateway: Gateway, store: Store, *, url: str, token: str, account_id: int, mix_key: str) -> None:
-    """Delete the Mix's Playlists from the Listener's Plex account, then forget them."""
-    for p in on_plex(store, account_id, mix_key):
-        try:
-            gateway.delete_playlist(url, token, p.playlist_id)
-        except NotFound:
-            pass  # the Listener already deleted it
-    store.forget_managed_playlists(account_id, mix_key)
+def delete_playlists(
+    gateway: Gateway, store: Store, *, url: str, token: str, account_id: int, mix_key: str, genres: set | None = None
+) -> None:
+    """Delete the Mix's Playlists (only those of `genres`, if given) from the Listener's Plex account, then forget them."""
+    for p in store.managed_playlists(account_id, mix_key):
+        if genres is not None and p.genre not in genres:
+            continue
+        if p.playlist_id:
+            try:
+                gateway.delete_playlist(url, token, p.playlist_id)
+            except NotFound:
+                pass  # the Listener already deleted it
+        store.forget_managed_playlist(account_id, mix_key, p.genre)
